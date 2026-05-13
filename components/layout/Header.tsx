@@ -1,9 +1,9 @@
-import { Search, Bell, Settings, User } from 'lucide-react';
+import { Search, Bell, Settings, User } from "lucide-react";
 
 export default function Header() {
   return (
-    <header className="h-[80px] flex items-center justify-between px-10 bg-bg-light shrink-0">
-      <div className="flex items-center bg-gray-200 rounded-md py-2 px-4 w-[500px] gap-3">
+    <header className="h-20 flex items-center justify-between px-10 bg-bg-light shrink-0">
+      <div className="flex items-center bg-gray-200 rounded-md py-2 px-4 w-125 gap-3">
         <Search className="text-gray-500" size={18} />
         <input
           type="text"
