@@ -10,7 +10,7 @@ const nextConfig: NextConfig = {
       },
       {
         source: "/api/appwrite-func",
-        destination: "https://69c7e0fb00237ca9bdcc.syd.appwrite.run/",
+        destination: process.env.APPWRITEAPIKEY,
       },
     ];
   },
