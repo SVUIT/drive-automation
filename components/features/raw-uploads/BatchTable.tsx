@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Folder, MoreVertical } from "lucide-react";
-
+import SelectPathDrawer from "./SelectPathDrawer";
 export type FileItem = {
   id: string;
   name: string;
@@ -107,6 +107,12 @@ export default function BatchTable({ data }: BatchTableProps) {
           )}
         </div>
       </div>
+
+      <SelectPathDrawer
+        isOpen={!!selectedFile}
+        onClose={() => setSelectedFile(null)}
+        file={selectedFile}
+      />
     </>
   );
 }
