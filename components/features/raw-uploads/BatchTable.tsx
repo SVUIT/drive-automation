@@ -20,8 +20,7 @@ interface BatchTableProps {
 }
 
 export default function BatchTable({ data }: BatchTableProps) {
-  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
-
+  const [, setSelectedFile] = useState<FileItem | null>(null);
   return (
     <>
       <div className="bg-white rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.05)] overflow-hidden mt-6 border border-gray-100">

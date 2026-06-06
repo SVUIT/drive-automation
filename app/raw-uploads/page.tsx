@@ -37,7 +37,6 @@ export default function RawUploadsPage() {
               form_submissions_id: String(item.form_submissions_id),
               name: `Submission #${item.form_submissions_id}`,
               docsCount: files.length,
-              sizeMB: 0,
               files: files.map((f: any) => ({
                 id: f.file_id || f.id || f.$id || f.gdrive_file_id,
                 name: f.name,
