@@ -22,26 +22,23 @@ interface PendingTableProps {
 
 export default function PendingTable({ data }: PendingTableProps) {
   return (
-    <div className="bg-white rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.05)] overflow-hidden mt-6 border border-gray-100 pb-2">
-      {/* Header */}
-      <div className="flex py-4 px-6 bg-[#f9fafb] border-b border-gray-200 text-[11px] font-semibold text-gray-500 tracking-wider uppercase">
-        <div className="flex-3 flex items-center">DOCUMENT NAME & FILES</div>
-        <div className="flex-2 flex items-center">GENERATED PATH</div>
-        <div className="flex-1 flex items-center">TOTAL FILES</div>
-        <div className="flex-1.5 flex items-center">APPROVER</div>
-        <div className="flex-1 flex items-center justify-end">ACTIONS</div>
-      </div>
+    <div className="bg-white rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.05)] overflow-x-auto mt-6 border border-gray-100 pb-2">
+      <div className="min-w-[800px] flex flex-col">
+        <div className="flex py-4 px-6 bg-[#f9fafb] border-b border-gray-200 text-[11px] font-semibold text-gray-500 tracking-wider uppercase">
+          <div className="flex-[3] flex items-center">DOCUMENT NAME & FILES</div>
+          <div className="flex-[2] flex items-center">GENERATED PATH</div>
+          <div className="flex-[1] flex items-center">TOTAL FILES</div>
+          <div className="flex-[1.5] flex items-center">APPROVER</div>
+          <div className="flex-[1] flex items-center justify-end">ACTIONS</div>
+        </div>
 
-      {/* Body */}
       <div className="flex flex-col divide-y divide-gray-200">
         {data.map((item, idx) => {
           const IconComponent = item.icon || File;
           return (
             <div key={item.id || idx} className="flex flex-col">
-              {/* Main Row */}
               <div className="flex py-4 px-6 items-center">
-                {/* Document Name */}
-                <div className="flex-3 flex items-center pr-4">
+                <div className="flex-[3] flex items-center pr-4">
                   <div className="w-10 h-10 bg-brand-blue-bg rounded-lg flex items-center justify-center mr-4 shrink-0">
                     <IconComponent size={20} className="text-brand-blue" />
                   </div>
@@ -50,19 +47,16 @@ export default function PendingTable({ data }: PendingTableProps) {
                   </span>
                 </div>
 
-                {/* Generated Path */}
-                <div className="flex-2 flex items-center pr-4">
+                <div className="flex-[2] flex items-center pr-4">
                   <span className="bg-gray-100 text-gray-500 text-[12px] px-2 py-1 rounded font-mono truncate">
                     {item.generatedPath}
                   </span>
                 </div>
 
-                {/* Total Files */}
-                <div className="flex-1 flex items-center text-[14px] font-medium text-gray-600 pl-4">
+                <div className="flex-[1] flex items-center text-[14px] font-medium text-gray-600 pl-4">
                   {item.totalFiles}
                 </div>
 
-                {/* Approver */}
                 <div className="flex-[1.5] flex items-center pr-4">
                   <input
                     type="text"
@@ -71,8 +65,7 @@ export default function PendingTable({ data }: PendingTableProps) {
                   />
                 </div>
 
-                {/* Actions */}
-                <div className="flex-1 flex items-center justify-end gap-2">
+                <div className="flex-[1] flex items-center justify-end gap-2">
                   <button className="flex items-center justify-center w-7 h-7 rounded bg-[#ffe6e6] text-[#e03131] hover:bg-[#ffcccc] transition-colors">
                     <X size={16} />
                   </button>
@@ -82,10 +75,8 @@ export default function PendingTable({ data }: PendingTableProps) {
                 </div>
               </div>
 
-              {/* Nested Items */}
               {item.files && item.files.length > 0 && (
                 <div className="px-6 pb-5 pl-20 flex flex-col gap-4 relative">
-                  {/* Vertical connecting line */}
                   <div className="absolute left-11 top-[-16px] bottom-7 w-px bg-gray-200"></div>
 
                   {item.files.map((file, nestedIdx) => {
@@ -95,7 +86,6 @@ export default function PendingTable({ data }: PendingTableProps) {
                         key={file.id || nestedIdx}
                         className="flex items-center relative"
                       >
-                        {/* Connecting horizontal stub */}
                         <div className="absolute left-[-36px] top-1/2 w-4 h-px bg-gray-200"></div>
 
                         <div className="flex items-center gap-3">
@@ -115,12 +105,12 @@ export default function PendingTable({ data }: PendingTableProps) {
           );
         })}
 
-        {/* Empty State */}
         {data.length === 0 && (
           <div className="py-8 text-center text-gray-500 text-[14px]">
             No pending documents available.
           </div>
         )}
+      </div>
       </div>
     </div>
   );

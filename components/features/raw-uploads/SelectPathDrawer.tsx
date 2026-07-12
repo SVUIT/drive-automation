@@ -20,7 +20,6 @@ export default function SelectPathDrawer({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingCourses, setIsLoadingCourses] = useState(false);
 
-  // Fetch courses when drawer opens
   React.useEffect(() => {
     if (isOpen && courses.length === 0) {
       const fetchCourses = async () => {
@@ -54,7 +53,6 @@ export default function SelectPathDrawer({
 
   if (!isOpen) return null;
 
-  // Format các giá trị thành đường dẫn chuẩn
   const shortSemester =
     semester === "Học kỳ 1" ? "HK1" : semester === "Học kỳ 2" ? "HK2" : "HK Hè";
   const basePath = `${subject}/${mainContent}/${shortSemester} ${year}`;
@@ -65,7 +63,6 @@ export default function SelectPathDrawer({
 
     try {
       setIsSubmitting(true);
-      // Gọi qua proxy
       const response = await fetch("/api/appwrite-func", {
         method: "POST",
         headers: {
