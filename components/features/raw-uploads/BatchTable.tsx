@@ -1,12 +1,15 @@
 import React, { useState } from "react";
-import { Folder, MoreVertical } from "lucide-react";
+import { CheckCircle2, Folder, MoreVertical, type LucideIcon } from "lucide-react";
 import SelectPathDrawer from "./SelectPathDrawer";
 
 export type FileItem = {
   id: string;
   name: string;
-  icon: any;
+  icon: LucideIcon;
   url?: string;
+  submissionId: string;
+  submissionFileCount: number;
+  status?: "raw" | "approved";
 };
 
 export type BatchItem = {
@@ -18,9 +21,10 @@ export type BatchItem = {
 
 interface BatchTableProps {
   data: BatchItem[];
+  onFileMoved?: (file: FileItem) => void;
 }
 
-export default function BatchTable({ data }: BatchTableProps) {
+export default function BatchTable({ data, onFileMoved }: BatchTableProps) {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   return (
     <>
@@ -84,10 +88,16 @@ export default function BatchTable({ data }: BatchTableProps) {
                             file.name
                           )}
                         </div>
+                        {file.status === "approved" && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-1 text-[11px] font-semibold text-green-700">
+                            <CheckCircle2 size={13} />
+                            APPROVED
+                          </span>
+                        )}
                         <button
                           onClick={() => setSelectedFile(file)}
                           className="bg-transparent border-none cursor-pointer text-gray-400 flex items-center justify-center w-6 h-6 rounded hover:bg-gray-100 hover:text-gray-900 transition-colors"
-                          title="Edit path for this file"
+                          title={file.status === "approved" ? "Move file to selected path" : "Edit path for this file"}
                         >
                           <MoreVertical size={16} />
                         </button>
@@ -112,6 +122,10 @@ export default function BatchTable({ data }: BatchTableProps) {
         isOpen={!!selectedFile}
         onClose={() => setSelectedFile(null)}
         file={selectedFile}
+        onMoveCompleted={(movedFile) => {
+          onFileMoved?.(movedFile);
+          setSelectedFile(null);
+        }}
       />
     </>
   );

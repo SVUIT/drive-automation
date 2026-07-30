@@ -1,22 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const APPWRITE_URL = 'https://69c7e0fb00237ca9bdcc.syd.appwrite.run/';
-
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    console.log('[Appwrite proxy] Request body:', JSON.stringify(body));
+    const appwriteUrl = process.env.APPWRITE_FUNCTION_URL;
 
-    const res = await fetch(APPWRITE_URL, {
+    if (!appwriteUrl) {
+      return NextResponse.json(
+        { error: 'APPWRITE_FUNCTION_URL is not configured' },
+        { status: 500 }
+      );
+    }
+
+    const body = await request.json();
+
+    const res = await fetch(appwriteUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      cache: 'no-store',
     });
 
-    console.log('[Appwrite proxy] Response status:', res.status);
-
     const text = await res.text();
-    console.log('[Appwrite proxy] Raw response:', text);
 
     if (!res.ok) {
       return NextResponse.json(
@@ -33,10 +37,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON from Appwrite', raw: text }, { status: 502 });
     }
 
-  } catch (err: any) {
-    console.error('[Appwrite proxy error]', err?.message ?? err);
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error('[Appwrite proxy error]', detail);
     return NextResponse.json(
-      { error: 'Internal proxy error', detail: err?.message },
+      { error: 'Internal proxy error', detail },
       { status: 500 }
     );
   }
