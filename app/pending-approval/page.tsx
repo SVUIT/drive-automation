@@ -7,6 +7,8 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '../context/AuthContext';
 
 const APPWRITE_URL = '/api/appwrite';
+const APPWRITE_ENV = process.env.NEXT_PUBLIC_APPWRITE_ENV ?? 'production';
+const APPROVED_FILES_KEY = `approvedFiles:${APPWRITE_ENV}`;
 
 function getIcon(name: string, mimeType?: string) {
   const ext = name?.split('.').pop()?.toLowerCase();
@@ -85,7 +87,7 @@ function PageContent() {
   // Store approved files in sessionStorage so approved-files page can read them
   useEffect(() => {
     if (approvedFiles.length > 0) {
-      sessionStorage.setItem('approvedFiles', JSON.stringify(approvedFiles));
+      sessionStorage.setItem(APPROVED_FILES_KEY, JSON.stringify(approvedFiles));
     }
   }, [approvedFiles]);
 

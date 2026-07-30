@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react';
 import { FileText, FileSpreadsheet, File, Archive, CheckCircle2 } from 'lucide-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
+const APPWRITE_ENV = process.env.NEXT_PUBLIC_APPWRITE_ENV ?? 'production';
+const APPROVED_FILES_KEY = `approvedFiles:${APPWRITE_ENV}`;
+
 type ApprovedFileEntry = {
   submissionId: string;
   submissionName: string;
@@ -33,7 +36,7 @@ function PageContent() {
 
   useEffect(() => {
     // Read approved files passed from pending page
-    const raw = sessionStorage.getItem('approvedFiles');
+    const raw = sessionStorage.getItem(APPROVED_FILES_KEY);
     if (!raw) return;
     const entries: ApprovedFileEntry[] = JSON.parse(raw);
 

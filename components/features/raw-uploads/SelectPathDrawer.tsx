@@ -5,20 +5,55 @@ interface SelectPathDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   file: FileItem | null;
+  onMoveCompleted?: (file: FileItem) => void;
 }
+
+type Course = {
+  id?: string;
+  course_name: string;
+};
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : "Lỗi không xác định";
+
+const postJson = async (url: string, body: unknown) => {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json();
+
+  if (!response.ok || result.error) {
+    const detail =
+      typeof result.detail === "string"
+        ? result.detail
+        : result.detail
+          ? JSON.stringify(result.detail)
+          : result.error;
+    throw new Error(detail || `HTTP ${response.status}`);
+  }
+
+  return result;
+};
 
 export default function SelectPathDrawer({
   isOpen,
   onClose,
   file,
+  onMoveCompleted,
 }: SelectPathDrawerProps) {
-  const [courses, setCourses] = useState<any[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
   const [subject, setSubject] = useState("");
+  const [customSubject, setCustomSubject] = useState("");
   const [semester, setSemester] = useState("Học kỳ 1");
   const [year, setYear] = useState("2024-2025");
   const [mainContent, setMainContent] = useState("Bài giảng");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingCourses, setIsLoadingCourses] = useState(false);
+  const [driveLink, setDriveLink] = useState("");
+  const DRIVE_ROOT_FOLDER_ID = "1QCtQ_o2dOxgTUWlZ8Avnrnnr5q4Jcgzc";
+  const DRIVE_ROOT_FOLDER_LINK = `https://drive.google.com/drive/folders/${DRIVE_ROOT_FOLDER_ID}`;
 
   // Fetch courses when drawer opens
   React.useEffect(() => {
@@ -26,7 +61,7 @@ export default function SelectPathDrawer({
       const fetchCourses = async () => {
         setIsLoadingCourses(true);
         try {
-          const response = await fetch("/api/appwrite-func", {
+          const response = await fetch("/api/appwrite", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -36,10 +71,15 @@ export default function SelectPathDrawer({
             }),
           });
           const result = await response.json();
+          if (!response.ok || result.error) {
+            throw new Error(result.detail || result.error || `HTTP ${response.status}`);
+          }
           if (result.data) {
             setCourses(result.data);
             if (result.data.length > 0) {
               setSubject(result.data[0].course_name);
+            } else {
+              setSubject("");
             }
           }
         } catch (err) {
@@ -55,43 +95,73 @@ export default function SelectPathDrawer({
   if (!isOpen) return null;
 
   // Format các giá trị thành đường dẫn chuẩn
+  const selectedSubject = (customSubject.trim() || subject).trim();
   const shortSemester =
     semester === "Học kỳ 1" ? "HK1" : semester === "Học kỳ 2" ? "HK2" : "HK Hè";
-  const basePath = `${subject}/${mainContent}/${shortSemester} ${year}`;
-  const destinationPath = file ? `${basePath}/${file.name}` : "";
+  const basePath = selectedSubject
+    ? `${selectedSubject}/${mainContent}/${shortSemester} ${year}`
+    : "";
+  const destinationPath = file && selectedSubject ? `${basePath}/${file.name}` : "";
 
   const handleSubmit = async () => {
-    if (!file) return;
+    if (!file || !selectedSubject) return;
+
+    if ([selectedSubject, mainContent, shortSemester, year].some((part) => part.includes("/"))) {
+      alert("Tên folder không được chứa ký tự /.");
+      return;
+    }
 
     try {
       setIsSubmitting(true);
-      // Gọi qua proxy
-      const response = await fetch("/api/appwrite-func", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      setDriveLink("");
+
+      const canMoveImmediately =
+        file.status === "approved" || file.submissionFileCount === 1;
+
+      const result = await postJson("/api/appwrite", {
           action: "insert file path",
           new_path: destinationPath,
-          approver: "none",
-          is_approved: false,
+          approver: "path-selector",
+          is_approved: canMoveImmediately,
           file_id: file.id,
-        }),
+          subject: selectedSubject,
+          folder_path: basePath,
+          parent_folder_id: DRIVE_ROOT_FOLDER_ID,
+          parent_folder_link: DRIVE_ROOT_FOLDER_LINK,
       });
 
-      const result = await response.json();
+      if (canMoveImmediately) {
+        await postJson("/api/appwrite", {
+          action: "approve submission",
+          submission_id: file.submissionId,
+        });
 
-      if (result.error) {
-        throw new Error(result.error);
+        await postJson("/api/appwrite-move", {});
+        onMoveCompleted?.(file);
       }
 
+      const updatedFile = Array.isArray(result.data) ? result.data[0] : undefined;
+      const returnedLink =
+        updatedFile?.web_view_link ||
+        updatedFile?.web_link_view ||
+        result.drive_link ||
+        result.web_view_link ||
+        result.folder_link ||
+        result.gdrive_folder_link ||
+        result.link ||
+        result.path ||
+        file.url ||
+        `https://drive.google.com/file/d/${encodeURIComponent(file.id)}/view`;
+      setDriveLink(returnedLink);
+
       console.log("Response từ API khi Submit:", result);
-      alert(`Đã cập nhật đường dẫn thành công!\n\n${destinationPath}`);
-      onClose();
-    } catch (err: any) {
+      alert(canMoveImmediately
+        ? `Đã đưa tác vụ tạo folder và chuyển file vào hàng đợi. Appwrite đang xử lý nền.\n\n${destinationPath}`
+        : `Đã lưu đường dẫn. Submission có nhiều file nên cần chọn path cho tất cả file trước khi duyệt và chuyển.\n\n${destinationPath}`
+      );
+    } catch (err: unknown) {
       console.error("Lỗi khi submit:", err);
-      alert(`Đã xảy ra lỗi: ${err.message}`);
+      alert(`Đã xảy ra lỗi: ${getErrorMessage(err)}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -122,14 +192,14 @@ export default function SelectPathDrawer({
                 {isLoadingCourses ? (
                   <option value="">Đang tải...</option>
                 ) : courses.length > 0 ? (
-                  courses.map((course: any) => (
-                    <option key={course.id} value={course.course_name}>
+                  courses.map((course) => (
+                    <option key={course.id ?? course.course_name} value={course.course_name}>
                       {course.course_name}
                     </option>
                   ))
                 ) : (
-                  <option value="IT001 - Nhập môn lập trình">
-                    IT001 - Nhập môn lập trình
+                  <option value="">
+                    Chưa có môn trong Drive, nhập môn mới bên dưới
                   </option>
                 )}
               </select>
@@ -139,6 +209,21 @@ export default function SelectPathDrawer({
                 </svg>
               </div>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-600 font-semibold mb-2 text-sm">
+              Môn mới (nếu muốn tạo)
+            </label>
+            <input
+              value={customSubject}
+              onChange={(e) => setCustomSubject(e.target.value)}
+              placeholder="Nhập tên môn mới để tạo folder"
+              className="w-full bg-[#dbdbdb] rounded-md p-3 text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+            />
+            <p className="mt-2 text-sm text-gray-500">
+              Nếu nhập môn mới, đường dẫn sẽ dùng tên này và Drive sẽ tự tạo folder tương ứng.
+            </p>
           </div>
 
           <div className="flex gap-4">
@@ -224,12 +309,29 @@ export default function SelectPathDrawer({
           <div className="pt-4">
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting || !file}
+              disabled={isSubmitting || !file || !selectedSubject}
               className="w-full bg-[#cccccc] hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700 font-bold py-3 rounded-md transition-colors text-[15px]"
             >
               {isSubmitting ? "Đang xử lý..." : "Submit"}
             </button>
           </div>
+
+          {driveLink && (
+            <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900">
+              <div className="font-semibold mb-1">Mở file trên Google Drive</div>
+              <p className="mb-2 text-xs text-green-800">
+                Mở link rồi xem mục “Vị trí” trong phần chi tiết của Drive để biết file đang nằm trong folder nào.
+              </p>
+              <a
+                href={driveLink}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-blue-700 underline break-all"
+              >
+                {driveLink}
+              </a>
+            </div>
+          )}
         </div>
 
         <div className="mt-8 text-center text-blue-600 font-bold text-xl tracking-wide">
