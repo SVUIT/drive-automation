@@ -6,9 +6,11 @@ import { Check, X, File } from "lucide-react";
 export type PendingFileItem = {
   gdrive_file_id: string;
   name: string;
-  icon: any;
+  icon: React.ElementType;
   is_approved?: boolean;
   move_status?: string;
+  url?: string;
+  new_path?: string;
 };
 
 export type PendingItem = {
@@ -16,7 +18,7 @@ export type PendingItem = {
   name: string;
   generatedPath: string;
   totalFiles: number;
-  icon: any;
+  icon: React.ElementType;
   files?: PendingFileItem[];
 };
 
@@ -155,7 +157,7 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
   return (
     <div className="bg-white rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.05)] overflow-hidden mt-6 border border-gray-100 pb-2">
       {/* Header */}
-      <div className="flex py-4 px-6 bg-[#f9fafb] border-b border-gray-200 text-[11px] font-semibold text-gray-500 tracking-wider uppercase">
+      <div className="hidden lg:flex py-4 px-6 bg-[#f9fafb] border-b border-gray-200 text-[11px] font-semibold text-gray-500 tracking-wider uppercase">
         <div className="flex-[3] flex items-center">Document name & files</div>
         <div className="flex-[2] flex items-center">Generated path</div>
         <div className="flex-[1] flex items-center">Total files</div>
@@ -169,27 +171,42 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
           return (
             <div key={item.id || idx} className="flex flex-col">
               {/* Submission row */}
-              <div className="flex py-4 px-6 items-center bg-[#fafafa]">
-                <div className="flex-[3] flex items-center pr-4">
+              <div className="flex flex-col lg:flex-row py-4 px-4 sm:px-6 lg:items-center bg-[#fafafa] gap-3 lg:gap-0">
+                {/* Name & Icon */}
+                <div className="flex-1 lg:flex-[3] flex items-center pr-0 lg:pr-4 min-w-0">
                   <div className="w-10 h-10 bg-brand-blue-bg rounded-lg flex items-center justify-center mr-4 shrink-0">
                     <IconComponent size={20} className="text-brand-blue" />
                   </div>
-                  <span className="font-bold text-[14px] text-gray-900 truncate">{item.name}</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="font-bold text-[14px] text-gray-900 block truncate">{item.name}</span>
+                    {/* Path visible on mobile only */}
+                    <span className="lg:hidden mt-1 text-[11px] text-gray-500 font-mono block truncate max-w-full">
+                      Path: {item.generatedPath || '—'}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex-[2] flex items-center pr-4">
-                  <span className="bg-gray-100 text-gray-500 text-[12px] px-2 py-1 rounded font-mono truncate">
+
+                {/* Path (Desktop only) */}
+                <div className="hidden lg:flex lg:flex-[2] items-center pr-4 min-w-0">
+                  <span className="bg-gray-100 text-gray-500 text-[12px] px-2 py-1 rounded font-mono truncate max-w-full" title={item.generatedPath}>
                     {item.generatedPath || '—'}
                   </span>
                 </div>
-                <div className="flex-[1] flex items-center text-[14px] font-medium text-gray-600 pl-4">
-                  {item.totalFiles}
+
+                {/* Total files (Desktop only) */}
+                <div className="hidden lg:flex lg:flex-[1] items-center text-[14px] font-medium text-gray-600 pl-4">
+                  <span>{item.totalFiles} file{item.totalFiles !== 1 ? 's' : ''}</span>
                 </div>
-                <div className="flex-[1.5]" />
-                <div className="flex-[1] flex items-center justify-end">
+
+                {/* Approver space (desktop spacer) */}
+                <div className="hidden lg:block lg:flex-[1.5]" />
+
+                {/* Approve all button (Desktop only) */}
+                <div className="hidden lg:flex lg:flex-[1] items-center justify-end">
                   <button
                     disabled={loadingSubmissionIds.has(item.id)}
                     onClick={() => handleApproveAllFiles(item)}
-                    className="flex items-center justify-center w-7 h-7 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60"
+                    className="flex items-center justify-center w-7 h-7 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60 cursor-pointer"
                     title="Approve All"
                   >
                     {loadingSubmissionIds.has(item.id) ? (
@@ -202,12 +219,37 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                     )}
                   </button>
                 </div>
+
+                {/* Mobile metadata line: total files & approve all button */}
+                <div className="flex lg:hidden items-center justify-between mt-2 pt-2 border-t border-gray-100">
+                  <div className="text-[13px] text-gray-500 font-medium">
+                    Tổng số file: <span className="text-gray-800 font-bold">{item.totalFiles}</span>
+                  </div>
+                  <button
+                    disabled={loadingSubmissionIds.has(item.id)}
+                    onClick={() => handleApproveAllFiles(item)}
+                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60 text-xs font-semibold cursor-pointer"
+                    title="Approve All"
+                  >
+                    {loadingSubmissionIds.has(item.id) ? (
+                      <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4"/>
+                        <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8v8z"/>
+                      </svg>
+                    ) : (
+                      <>
+                        <Check size={14} />
+                        <span>Duyệt tất cả</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* File rows */}
               {item.files && item.files.length > 0 && (
-                <div className="px-6 pb-5 pl-20 flex flex-col gap-2 relative">
-                  <div className="absolute left-11 top-[-16px] bottom-7 w-px bg-gray-200" />
+                <div className="px-4 sm:px-6 pb-5 pl-6 sm:pl-8 lg:pl-20 flex flex-col gap-2 relative">
+                  <div className="absolute left-[15px] sm:left-[20px] lg:left-11 top-[-16px] bottom-7 w-px bg-gray-200" />
                   {item.files.map((file, nestedIdx) => {
                     const FileIcon = file.icon || File;
                     const isLoading = loadingFileIds.has(file.gdrive_file_id);
@@ -216,27 +258,51 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                     const isDone = isApproved || isSkipped;
 
                     return (
-                      <div key={file.gdrive_file_id || nestedIdx} className="flex items-center relative">
-                        <div className="absolute left-[-36px] top-1/2 w-4 h-px bg-gray-200" />
+                      <div key={file.gdrive_file_id || nestedIdx} className="flex flex-col lg:flex-row items-stretch lg:items-center relative gap-2 lg:gap-0 border-b border-dashed border-gray-100 lg:border-none pb-2 lg:pb-0 pt-2 lg:pt-0">
+                        <div className="absolute left-[-15px] sm:left-[-25px] lg:left-[-36px] top-[18px] lg:top-1/2 w-2.5 sm:w-3 lg:w-4 h-px bg-gray-200" />
 
                         {/* File name */}
-                        <div className="flex-[3] flex items-center gap-3 pr-4">
+                        <div className="flex-1 lg:flex-[3] flex items-start gap-3 min-w-0 pr-0 lg:pr-4">
                           <div className="flex items-center justify-center shrink-0 bg-white z-10 py-1">
                             <FileIcon size={18} className={isDone ? "text-gray-300" : "text-brand-blue"} />
                           </div>
-                          <div className={`text-[14px] font-medium truncate ${isDone ? 'text-gray-300 line-through' : 'text-gray-600'}`}>
-                            {file.name}
+                          <div className="flex-1 min-w-0">
+                            <div className={`text-[14px] font-medium leading-tight ${isDone ? 'text-gray-300 line-through' : 'text-gray-700'}`}>
+                              {file.url ? (
+                                <a
+                                  href={file.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="hover:text-blue-600 hover:underline transition-colors cursor-pointer break-all"
+                                >
+                                  {file.name}
+                                </a>
+                              ) : (
+                                <span className="break-all">{file.name}</span>
+                              )}
+                            </div>
+                            {/* Approver email/error (Mobile only) */}
+                            {isApproved && (
+                              <span className="lg:hidden mt-0.5 text-[11px] text-gray-400 block truncate">
+                                Người duyệt: {approverEmail}
+                              </span>
+                            )}
+                            {errors[file.gdrive_file_id] && (
+                              <span className="lg:hidden mt-0.5 text-[11px] text-red-500 block">
+                                {errors[file.gdrive_file_id]}
+                              </span>
+                            )}
                           </div>
                         </div>
 
-                        {/* Path (inherited from submission) */}
-                        <div className="flex-[2] pr-4" />
+                        {/* Path (inherited from submission) - Desktop only */}
+                        <div className="hidden lg:block lg:flex-[2] pr-4" />
 
-                        {/* — */}
-                        <div className="flex-[1] pl-4" />
+                        {/* Spacer - Desktop only */}
+                        <div className="hidden lg:block lg:flex-[1] pl-4" />
 
-                        {/* Approver */}
-                        <div className="flex-[1.5] pr-4">
+                        {/* Approver - Desktop only */}
+                        <div className="hidden lg:flex lg:flex-[1.5] pr-4 items-center">
                           {isApproved && (
                             <span className="text-[12px] text-gray-400 truncate">{approverEmail}</span>
                           )}
@@ -246,7 +312,7 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                         </div>
 
                         {/* Actions */}
-                        <div className="flex-[1] flex items-center justify-end gap-2">
+                        <div className="w-full lg:w-auto lg:flex-[1] flex items-center justify-end gap-2 mt-1 lg:mt-0">
                           {isDone ? (
                             <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
                               isApproved
@@ -256,19 +322,20 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                               {isApproved ? 'Approved' : 'Skipped'}
                             </span>
                           ) : (
-                            <>
+                            <div className="flex gap-2 w-full lg:w-auto justify-end">
                               <button
                                 disabled={isLoading}
                                 onClick={() => handleSkipFile(item, file)}
-                                className="flex items-center justify-center w-7 h-7 rounded bg-[#ffe6e6] text-[#e03131] hover:bg-[#ffcccc] transition-colors disabled:opacity-40"
+                                className="flex-1 lg:flex-none flex items-center justify-center w-auto lg:w-7 h-8 lg:h-7 rounded bg-[#ffe6e6] text-[#e03131] hover:bg-[#ffcccc] transition-colors disabled:opacity-40 px-3 lg:px-0 text-xs font-semibold lg:font-normal cursor-pointer"
                                 title="Skip"
                               >
-                                <X size={16} />
+                                <X size={16} className="mr-1 lg:mr-0" />
+                                <span className="lg:hidden">Bỏ qua</span>
                               </button>
                               <button
                                 disabled={isLoading}
                                 onClick={() => handleApproveFile(item, file)}
-                                className="flex items-center justify-center w-7 h-7 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60"
+                                className="flex-1 lg:flex-none flex items-center justify-center w-auto lg:w-7 h-8 lg:h-7 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60 px-3 lg:px-0 text-xs font-semibold lg:font-normal cursor-pointer"
                                 title="Approve"
                               >
                                 {isLoading ? (
@@ -277,10 +344,13 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                                     <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8v8z"/>
                                   </svg>
                                 ) : (
-                                  <Check size={16} />
+                                  <>
+                                    <Check size={16} className="mr-1 lg:mr-0" />
+                                    <span className="lg:hidden">Duyệt</span>
+                                  </>
                                 )}
                               </button>
-                            </>
+                            </div>
                           )}
                         </div>
                       </div>

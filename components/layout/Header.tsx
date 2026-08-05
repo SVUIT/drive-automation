@@ -1,11 +1,15 @@
 'use client';
 
-import { Search, Bell, Settings, User, LogOut } from "lucide-react";
+import { Search, Bell, Settings, User, LogOut, Menu } from "lucide-react";
 import { useAuth } from "../../app/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 
-export default function Header() {
+interface HeaderProps {
+  onMenuClick?: () => void;
+}
+
+export default function Header({ onMenuClick }: HeaderProps) {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -30,16 +34,27 @@ export default function Header() {
   }, []);
 
   return (
-    <header className="h-20 flex items-center justify-between px-10 bg-bg-light shrink-0">
-      <div className="flex items-center bg-gray-200 rounded-md py-2 px-4 w-125 gap-3">
-        <Search className="text-gray-500" size={18} />
-        <input
-          type="text"
-          placeholder="Nhập tìm kiếm ..."
-          className="border-none bg-transparent outline-none text-[14px] w-full text-gray-900 placeholder:text-gray-500 font-sans"
-        />
+    <header className="h-20 flex items-center justify-between px-4 sm:px-6 lg:px-10 bg-bg-light shrink-0 gap-4">
+      <div className="flex items-center gap-3 flex-1 min-w-0">
+        {onMenuClick && (
+          <button
+            onClick={onMenuClick}
+            className="lg:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-md shrink-0 cursor-pointer"
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
+        )}
+        <div className="flex items-center bg-gray-200 rounded-md py-2 px-4 w-full max-w-[200px] xs:max-w-[280px] sm:max-w-[400px] md:max-w-[500px] gap-3">
+          <Search className="text-gray-500 shrink-0" size={18} />
+          <input
+            type="text"
+            placeholder="Nhập tìm kiếm ..."
+            className="border-none bg-transparent outline-none text-[14px] w-full text-gray-900 placeholder:text-gray-500 font-sans"
+          />
+        </div>
       </div>
-      <div className="flex gap-4 items-center">
+      <div className="flex gap-4 items-center shrink-0">
         <button className="bg-transparent border-none cursor-pointer text-gray-500 flex items-center justify-center rounded-full w-10 h-10 transition-all duration-200 hover:bg-gray-100 hover:text-gray-900">
           <Bell size={20} />
         </button>
