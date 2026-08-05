@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { FileItem } from "./BatchTable";
+import { ArrowLeft, X } from "lucide-react";
 
 interface SelectPathDrawerProps {
   isOpen: boolean;
@@ -173,8 +174,27 @@ export default function SelectPathDrawer({
         className="fixed inset-0 bg-black/20 z-40 transition-opacity"
         onClick={onClose}
       />
-      <div className="fixed right-0 top-0 bottom-0 w-100 bg-white shadow-2xl z-50 p-8 flex flex-col overflow-y-auto transform transition-transform duration-300">
-        <h2 className="text-blue-600 text-3xl font-extrabold text-center mb-8 tracking-tight">
+      <div className="fixed inset-0 sm:left-auto sm:right-0 w-full sm:w-[400px] h-full bg-white shadow-2xl z-50 p-6 sm:p-8 flex flex-col overflow-y-auto transform transition-transform duration-300">
+        <div className="flex items-center justify-between mb-6 border-b border-gray-100 pb-4 sm:border-none sm:pb-0">
+          <button
+            onClick={onClose}
+            className="flex items-center gap-2 text-gray-500 hover:text-gray-900 transition-colors cursor-pointer py-1.5 px-3 rounded-lg hover:bg-gray-100"
+            aria-label="Back"
+          >
+            <ArrowLeft size={18} />
+            <span className="text-sm font-semibold">Quay lại</span>
+          </button>
+          <span className="text-gray-900 font-bold text-base sm:hidden">Chọn đường dẫn</span>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer p-1.5 rounded-full hover:bg-gray-100"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <h2 className="hidden sm:block text-blue-600 text-3xl font-extrabold text-center mb-8 tracking-tight">
           Select path
         </h2>
 

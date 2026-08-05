@@ -10,21 +10,25 @@ import Header from '@/components/layout/Header';
 
 const inter = Inter({ subsets: ['latin'] });
 
+import { useState } from 'react';
+
 function LayoutContent({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const pathname = usePathname();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const isLoginPage = pathname === '/login';
   const isAuthenticated = !!user && !loading;
 
+
   // Hiển thị sidebar/header chỉ khi đã đăng nhập và không ở trang login
   if (isAuthenticated && !isLoginPage) {
     return (
-      <div className="flex h-screen w-screen overflow-hidden">
-        <Sidebar />
+      <div className="flex h-screen w-screen overflow-hidden relative">
+        <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Header />
-          <main className="flex-1 overflow-y-auto px-10 pb-10">
+          <Header onMenuClick={() => setIsSidebarOpen(true)} />
+          <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-10 pb-10">
             {children}
           </main>
         </div>
