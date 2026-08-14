@@ -7,6 +7,9 @@ export type PendingFileItem = {
   gdrive_file_id: string;
   name: string;
   icon: React.ElementType;
+  web_view_link?: string;
+  new_file_path?: string;
+  destination_folder_link?: string;
   is_approved?: boolean;
   move_status?: string;
   url?: string;
@@ -59,7 +62,7 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "insert file path",
-          new_path: (item.generatedPath ?? '') + file.name,
+          new_path: file.new_file_path || item.generatedPath,
           approver: approverEmail,
           is_approved: true,
           file_id: file.gdrive_file_id,
@@ -126,7 +129,7 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               action: "insert file path",
-              new_path: (item.generatedPath ?? '') + file.name,
+              new_path: file.new_file_path || item.generatedPath,
               approver: approverEmail,
               is_approved: true,
               file_id: file.gdrive_file_id,
@@ -179,19 +182,11 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                   </div>
                   <div className="flex-1 min-w-0">
                     <span className="font-bold text-[14px] text-gray-900 block truncate">{item.name}</span>
-                    {/* Path visible on mobile only */}
-                    <span className="lg:hidden mt-1 text-[11px] text-gray-500 font-mono block truncate max-w-full">
-                      Path: {item.generatedPath || '—'}
-                    </span>
                   </div>
                 </div>
 
-                {/* Path (Desktop only) */}
-                <div className="hidden lg:flex lg:flex-[2] items-center pr-4 min-w-0">
-                  <span className="bg-gray-100 text-gray-500 text-[12px] px-2 py-1 rounded font-mono truncate max-w-full" title={item.generatedPath}>
-                    {item.generatedPath || '—'}
-                  </span>
-                </div>
+                {/* Generated path is displayed on each file row only. */}
+                <div className="hidden lg:block lg:flex-[2] pr-4" />
 
                 {/* Total files (Desktop only) */}
                 <div className="hidden lg:flex lg:flex-[1] items-center text-[14px] font-medium text-gray-600 pl-4">
@@ -295,8 +290,33 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                           </div>
                         </div>
 
-                        {/* Path (inherited from submission) - Desktop only */}
-                        <div className="hidden lg:block lg:flex-[2] pr-4" />
+                        {/* Generated path of this file from submitted_files.new_file_path */}
+                        <div className="lg:flex-[2] pr-0 lg:pr-4 min-w-0 pl-7 lg:pl-0">
+                          {file.new_file_path ? (
+                            file.destination_folder_link ? (
+                              <a
+                                href={file.destination_folder_link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block truncate rounded bg-blue-50 px-2 py-1 font-mono text-[11px] text-blue-600 hover:underline"
+                                title={file.new_file_path}
+                              >
+                                {file.new_file_path}
+                              </a>
+                            ) : (
+                              <span
+                                className="block truncate rounded bg-gray-100 px-2 py-1 font-mono text-[11px] text-gray-600"
+                                title={file.new_file_path}
+                              >
+                                {file.new_file_path}
+                              </span>
+                            )
+                          ) : (
+                            <span className="block rounded bg-amber-50 px-2 py-1 font-mono text-[11px] text-amber-600">
+                              Chưa có path
+                            </span>
+                          )}
+                        </div>
 
                         {/* Spacer - Desktop only */}
                         <div className="hidden lg:block lg:flex-[1] pl-4" />
