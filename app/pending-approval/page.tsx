@@ -29,7 +29,6 @@ export type ApprovedFileEntry = {
 function PageContent() {
   const { user } = useAuth();
   const [submissions, setSubmissions] = useState<PendingItem[]>([]);
-  const [approvedFiles, setApprovedFiles] = useState<ApprovedFileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,23 +40,40 @@ function PageContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'fetch unapproved submissions' }),
+        cache: 'no-store',
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
+      if (json.error) throw new Error(json.error);
       const rawList = json.data ?? json.submissions ?? (Array.isArray(json) ? json : []);
 
-      const items: PendingItem[] = rawList.map((sub: any) => ({
-        id: String(sub.form_submissions_id ?? sub.id),
-        name: sub.name ?? `Submission #${sub.form_submissions_id}`,
-        generatedPath: sub.gdrive_folder_link ?? '',
-        totalFiles: sub.total_file ?? sub.submitted_files?.length ?? 0,
-        icon: getIcon(sub.name ?? '', sub.mime_type),
-        files: (sub.submitted_files ?? sub.files ?? []).map((f: any) => ({
-          gdrive_file_id: f.gdrive_file_id,
-          name: f.name,
-          icon: getIcon(f.name ?? '', f.mime_type),
-        })),
-      }));
+      const items: PendingItem[] = rawList.map((sub: any) => {
+        const files = sub.submitted_files ?? sub.files ?? [];
+        const firstFileWithPath = files.find(
+          (file: any) => file.new_file_path || file.destination_folder_link
+        );
+
+        return {
+          id: String(sub.form_submissions_id ?? sub.id),
+          name: sub.name ?? `Submission #${sub.form_submissions_id}`,
+          generatedPath:
+            firstFileWithPath?.new_file_path ??
+            firstFileWithPath?.destination_folder_link ??
+            sub.gdrive_folder_link ??
+            '',
+          totalFiles: sub.total_file ?? files.length,
+          icon: getIcon(sub.name ?? '', sub.mime_type),
+          files: files.map((f: any) => ({
+            gdrive_file_id: f.gdrive_file_id,
+            name: f.name,
+            icon: getIcon(f.name ?? '', f.mime_type),
+            web_view_link: f.web_view_link ?? f.web_link_view ?? '',
+            url: f.web_view_link ?? f.web_link_view ?? '',
+            new_file_path: f.new_file_path ?? '',
+            destination_folder_link: f.destination_folder_link ?? '',
+          })),
+        };
+      });
 
       setSubmissions(items);
     } catch (e: any) {
@@ -71,25 +87,25 @@ function PageContent() {
 
   // Called when a single file is approved → move to approved list
   const handleFileApproved = (submissionId: string, submissionName: string, file: PendingFileItem) => {
-    setApprovedFiles(prev => [...prev, {
+    const entry: ApprovedFileEntry = {
       submissionId,
       submissionName,
       file,
       approvedAt: new Date().toISOString(),
-    }]);
+    };
+
+    const stored = localStorage.getItem(APPROVED_FILES_KEY);
+    const current: ApprovedFileEntry[] = stored ? JSON.parse(stored) : [];
+    const withoutDuplicate = current.filter(
+      approved => approved.file.gdrive_file_id !== file.gdrive_file_id
+    );
+    localStorage.setItem(APPROVED_FILES_KEY, JSON.stringify([...withoutDuplicate, entry]));
   };
 
   // Called when all files in a submission are done → remove submission from pending
   const handleSubmissionDone = (submissionId: string) => {
     setSubmissions(prev => prev.filter(s => s.id !== submissionId));
   };
-
-  // Store approved files in sessionStorage so approved-files page can read them
-  useEffect(() => {
-    if (approvedFiles.length > 0) {
-      sessionStorage.setItem(APPROVED_FILES_KEY, JSON.stringify(approvedFiles));
-    }
-  }, [approvedFiles]);
 
   return (
     <div>

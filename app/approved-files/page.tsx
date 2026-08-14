@@ -36,7 +36,7 @@ function PageContent() {
 
   useEffect(() => {
     // Read approved files passed from pending page
-    const raw = sessionStorage.getItem(APPROVED_FILES_KEY);
+    const raw = localStorage.getItem(APPROVED_FILES_KEY);
     if (!raw) return;
     const entries: ApprovedFileEntry[] = JSON.parse(raw);
 
