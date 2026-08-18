@@ -116,6 +116,29 @@ export default function SelectPathDrawer({
       setIsSubmitting(true);
       setDriveLink("");
 
+      const trimmedCustomSubject = customSubject.trim();
+      const subjectExists = courses.some(
+        (course) => course.course_name.trim().toLowerCase() === selectedSubject.toLowerCase()
+      );
+
+      if (trimmedCustomSubject && !subjectExists) {
+        await postJson("/api/appwrite", {
+          action: "add course",
+          course_name: trimmedCustomSubject,
+        });
+
+        setCourses((prev) => {
+          const exists = prev.some(
+            (course) => course.course_name.trim().toLowerCase() === trimmedCustomSubject.toLowerCase()
+          );
+
+          if (exists) return prev;
+          return [...prev, { course_name: trimmedCustomSubject }];
+        });
+        setSubject(trimmedCustomSubject);
+        setCustomSubject("");
+      }
+
       const canMoveImmediately =
         file.status === "approved" || file.submissionFileCount === 1;
 
