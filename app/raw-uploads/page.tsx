@@ -6,10 +6,7 @@ import BatchTable, {
   BatchItem,
   FileItem,
 } from "@/components/features/raw-uploads/BatchTable";
-
-const APPWRITE_ENV = process.env.NEXT_PUBLIC_APPWRITE_ENV ?? "production";
-const APPROVED_RAW_UPLOADS_KEY = `approvedRawUploads:${APPWRITE_ENV}`;
-const APPROVED_FILES_KEY = `approvedFiles:${APPWRITE_ENV}`;
+import { getReturnedFiles } from "@/app/approved-files/returned-files";
 
 type ApiFile = {
   file_id?: string;
@@ -18,6 +15,10 @@ type ApiFile = {
   gdrive_file_id?: string;
   name: string;
   web_view_link?: string;
+  new_file_path?: string | null;
+  destination_folder_link?: string | null;
+  is_approved?: boolean | number | string;
+  return_reason?: string;
 };
 
 type ApiSubmission = {
@@ -28,132 +29,6 @@ type ApiSubmission = {
 type UploadsResponse = {
   data?: ApiSubmission[];
   error?: string | null;
-};
-
-type StoredApprovedBatch = {
-  form_submissions_id: string;
-  name: string;
-  files: Array<Pick<FileItem, "id" | "name" | "url" | "submissionId" | "submissionFileCount">>;
-};
-
-type SessionApprovedEntry = {
-  submissionId: string;
-  submissionName: string;
-  file: {
-    gdrive_file_id: string;
-    name: string;
-    web_view_link?: string;
-  };
-};
-
-const readApprovedBatches = (): BatchItem[] => {
-  try {
-    const stored = localStorage.getItem(APPROVED_RAW_UPLOADS_KEY);
-    if (!stored) return [];
-
-    const parsed: StoredApprovedBatch[] = JSON.parse(stored);
-    return parsed.map((batch) => ({
-      form_submissions_id: batch.form_submissions_id,
-      name: batch.name,
-      docsCount: batch.files.length,
-      files: batch.files.map((file) => ({
-        ...file,
-        icon: File,
-        status: "approved",
-      })),
-    }));
-  } catch {
-    return [];
-  }
-};
-
-const writeApprovedBatches = (batches: BatchItem[]) => {
-  const approved: StoredApprovedBatch[] = batches
-    .map((batch) => ({
-      form_submissions_id: batch.form_submissions_id,
-      name: batch.name,
-      files: batch.files
-        .filter((file) => file.status === "approved")
-        .map(({ id, name, url, submissionId, submissionFileCount }) => ({
-          id,
-          name,
-          url,
-          submissionId,
-          submissionFileCount,
-        })),
-    }))
-    .filter((batch) => batch.files.length > 0);
-
-  localStorage.setItem(APPROVED_RAW_UPLOADS_KEY, JSON.stringify(approved));
-};
-
-const readSessionApprovedBatches = (): BatchItem[] => {
-  try {
-    const stored = sessionStorage.getItem(APPROVED_FILES_KEY);
-    if (!stored) return [];
-
-    const entries: SessionApprovedEntry[] = JSON.parse(stored);
-    const grouped = new Map<string, BatchItem>();
-
-    entries.forEach((entry) => {
-      const existing = grouped.get(entry.submissionId);
-      const file: FileItem = {
-        id: entry.file.gdrive_file_id,
-        name: entry.file.name,
-        url:
-          entry.file.web_view_link ||
-          `https://drive.google.com/file/d/${encodeURIComponent(entry.file.gdrive_file_id)}/view`,
-        icon: File,
-        submissionId: entry.submissionId,
-        submissionFileCount: 1,
-        status: "approved",
-      };
-
-      if (existing) {
-        if (!existing.files.some((item) => item.id === file.id)) {
-          existing.files.push(file);
-          existing.docsCount = existing.files.length;
-          existing.files.forEach((item) => {
-            item.submissionFileCount = existing.files.length;
-          });
-        }
-        return;
-      }
-
-      grouped.set(entry.submissionId, {
-        form_submissions_id: entry.submissionId,
-        name: entry.submissionName,
-        docsCount: 1,
-        files: [file],
-      });
-    });
-
-    return Array.from(grouped.values());
-  } catch {
-    return [];
-  }
-};
-
-const mergeBatches = (current: BatchItem[], approved: BatchItem[]) => {
-  const merged = new Map(current.map((batch) => [batch.form_submissions_id, batch]));
-
-  approved.forEach((approvedBatch) => {
-    const existing = merged.get(approvedBatch.form_submissions_id);
-    if (!existing) {
-      merged.set(approvedBatch.form_submissions_id, approvedBatch);
-      return;
-    }
-
-    const files = new Map(existing.files.map((file) => [file.id, file]));
-    approvedBatch.files.forEach((file) => files.set(file.id, file));
-    merged.set(existing.form_submissions_id, {
-      ...existing,
-      files: Array.from(files.values()),
-      docsCount: files.size,
-    });
-  });
-
-  return Array.from(merged.values());
 };
 
 export default function RawUploadsPage() {
@@ -173,51 +48,71 @@ export default function RawUploadsPage() {
           body: JSON.stringify({ action: "fetch unapproved submissions" }),
         });
 
-        const result: UploadsResponse = await response.json();
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
 
+        const result: UploadsResponse = await response.json();
         if (result.error) {
           throw new Error(result.error);
         }
 
-        if (result.data) {
-          const apiBatches = result.data.map((item) => {
-            const files = item.submitted_files || [];
+        const apiBatches: BatchItem[] = (result.data ?? []).map((item) => {
+          const files = (item.submitted_files || []).filter(
+            (file) => file.is_approved !== true && file.is_approved !== 1 && file.is_approved !== "true"
+          );
+          const submissionId = String(item.form_submissions_id);
+          const mappedFiles = files.flatMap((file): FileItem[] => {
+            const id = file.file_id || file.id || file.$id || file.gdrive_file_id;
+            if (!id) return [];
 
-            return {
-              form_submissions_id: String(item.form_submissions_id),
-              name: `Submission #${item.form_submissions_id}`,
-              docsCount: files.length,
-              files: files.flatMap((f) => {
-                const id = f.file_id || f.id || f.$id || f.gdrive_file_id;
-                if (!id) return [];
-
-                return [{
-                  id,
-                  name: f.name,
-                  url: f.web_view_link,
-                  icon: File,
-                  submissionId: String(item.form_submissions_id),
-                  submissionFileCount: files.length,
-                }];
-              }),
-            };
+            return [{
+              id,
+              name: file.name,
+              url: file.web_view_link,
+              icon: File,
+              submissionId,
+              new_file_path: file.new_file_path ?? undefined,
+              return_reason: file.return_reason,
+            }];
           });
 
-          const retainedApproved = mergeBatches(
-            readApprovedBatches(),
-            readSessionApprovedBatches()
-          );
-          const merged = mergeBatches(apiBatches, retainedApproved);
-          writeApprovedBatches(merged);
-          setBatches(merged);
-        } else {
-          const approved = mergeBatches(
-            readApprovedBatches(),
-            readSessionApprovedBatches()
-          );
-          writeApprovedBatches(approved);
-          setBatches(approved);
+          return {
+            form_submissions_id: submissionId,
+            name: `Submission #${submissionId}`,
+            docsCount: mappedFiles.length,
+            files: mappedFiles,
+          };
+        }).filter((batch) => batch.files.length > 0);
+
+        const mergedBatches = new Map(apiBatches.map(batch => [batch.form_submissions_id, batch]));
+        for (const returned of getReturnedFiles()) {
+          const batch = mergedBatches.get(returned.submissionId) ?? {
+            form_submissions_id: returned.submissionId,
+            name: returned.submissionName,
+            docsCount: 0,
+            files: [],
+          };
+          const returnedFile: FileItem = {
+            id: returned.fileId,
+            name: returned.name,
+            url: returned.url,
+            icon: File,
+            submissionId: returned.submissionId,
+            new_file_path: returned.new_file_path,
+            return_reason: returned.return_reason,
+          };
+          const files = batch.files.some(file => file.id === returned.fileId)
+            ? batch.files.map(file => file.id === returned.fileId ? returnedFile : file)
+            : [...batch.files, returnedFile];
+          mergedBatches.set(returned.submissionId, {
+            ...batch,
+            files,
+            docsCount: files.length,
+          });
         }
+
+        setBatches(Array.from(mergedBatches.values()));
       } catch (err: unknown) {
         console.error("Fetch error:", err);
         setError(err instanceof Error ? err.message : "Lỗi không xác định");
@@ -249,18 +144,14 @@ export default function RawUploadsPage() {
       ) : (
         <BatchTable
           data={batches}
-          onFileMoved={(movedFile) => {
+          onPathSaved={(savedFile, path) => {
             setBatches((current) => {
-              const next = current.map((batch) => ({
+              return current.map((batch) => ({
                 ...batch,
-                files: batch.files.map((file) =>
-                  file.id === movedFile.id
-                    ? { ...file, status: "approved" as const }
-                    : file
-                ),
+                files: batch.files.map((file) => file.id === savedFile.id
+                  ? { ...file, new_file_path: path }
+                  : file),
               }));
-              writeApprovedBatches(next);
-              return next;
             });
           }}
         />

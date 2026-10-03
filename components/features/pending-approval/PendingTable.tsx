@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from "react";
-import { Check, X, File } from "lucide-react";
+import { Check, File } from "lucide-react";
+import { removeReturnedFile } from "@/app/approved-files/returned-files";
 
 export type PendingFileItem = {
   gdrive_file_id: string;
@@ -10,7 +11,8 @@ export type PendingFileItem = {
   web_view_link?: string;
   new_file_path?: string;
   destination_folder_link?: string;
-  is_approved?: boolean;
+  is_approved?: boolean | number | string | null;
+  return_reason?: string;
   move_status?: string;
   url?: string;
   new_path?: string;
@@ -19,7 +21,6 @@ export type PendingFileItem = {
 export type PendingItem = {
   id: string;
   name: string;
-  generatedPath: string;
   totalFiles: number;
   icon: React.ElementType;
   files?: PendingFileItem[];
@@ -28,28 +29,86 @@ export type PendingItem = {
 interface PendingTableProps {
   data: PendingItem[];
   approverEmail: string;
-  onFileApproved: (submissionId: string, submissionName: string, file: PendingFileItem) => void;
   onSubmissionDone: (submissionId: string) => void;
 }
 
 const APPWRITE_URL = '/api/appwrite';
+const MOVE_URL = '/api/appwrite-move';
+const isFileApproved = (file: PendingFileItem) =>
+  file.is_approved === true || file.is_approved === 1 || file.is_approved === 'true';
 
-export default function PendingTable({ data, approverEmail, onFileApproved, onSubmissionDone }: PendingTableProps) {
+const postJson = async (url: string, body: unknown) => {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json();
+
+  if (!response.ok || result.error) {
+    const detail = typeof result.detail === 'string'
+      ? result.detail
+      : result.detail
+        ? JSON.stringify(result.detail)
+        : undefined;
+    throw new Error(detail || result.error || `HTTP ${response.status}`);
+  }
+};
+
+export default function PendingTable({ data, approverEmail, onSubmissionDone }: PendingTableProps) {
   const [loadingFileIds, setLoadingFileIds] = useState<Set<string>>(new Set());
   const [loadingSubmissionIds, setLoadingSubmissionIds] = useState<Set<string>>(new Set());
-  const [skippedFileIds, setSkippedFileIds] = useState<Set<string>>(new Set());
   const [approvedFileIds, setApprovedFileIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const setFileLoading = (id: string, val: boolean) =>
-    setLoadingFileIds(prev => { const s = new Set(prev); val ? s.add(id) : s.delete(id); return s; });
+    setLoadingFileIds(prev => {
+      const next = new Set(prev);
+      if (val) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   const setSubmissionLoading = (id: string, val: boolean) =>
-    setLoadingSubmissionIds(prev => { const s = new Set(prev); val ? s.add(id) : s.delete(id); return s; });
+    setLoadingSubmissionIds(prev => {
+      const next = new Set(prev);
+      if (val) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  const setFileApproved = async (file: PendingFileItem) => {
+    if (!file.new_file_path?.trim()) {
+      throw new Error("Chưa có path. Vui lòng lưu path trước khi duyệt.");
+    }
+
+    await postJson(APPWRITE_URL, {
+      action: "insert file path",
+      new_path: file.new_file_path,
+      approver: approverEmail,
+      is_approved: true,
+      file_id: file.gdrive_file_id,
+    });
+  };
+
+  const queueMove = async () => {
+    await postJson(MOVE_URL, {});
+  };
+
+  const approveSubmission = async (submissionId: string) => {
+    await postJson(APPWRITE_URL, {
+      action: "approve submission",
+      submission_id: submissionId,
+    });
+  };
 
   const handleApproveFile = async (item: PendingItem, file: PendingFileItem) => {
     if (!approverEmail) {
       setErrors(prev => ({ ...prev, [file.gdrive_file_id]: "Chưa đăng nhập." }));
+      return;
+    }
+    if (!file.new_file_path?.trim()) {
+      setErrors(prev => ({ ...prev, [file.gdrive_file_id]: "Chưa có path. Vui lòng lưu path trước khi duyệt." }));
       return;
     }
 
@@ -57,51 +116,33 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
     setFileLoading(file.gdrive_file_id, true);
 
     try {
-      const res = await fetch(APPWRITE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "insert file path",
-          new_path: file.new_file_path || item.generatedPath,
-          approver: approverEmail,
-          is_approved: true,
-          file_id: file.gdrive_file_id,
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
+      await setFileApproved(file);
+      removeReturnedFile(file.gdrive_file_id);
       setApprovedFileIds(prev => new Set(prev).add(file.gdrive_file_id));
-      onFileApproved(item.id, item.name, file);
 
-      // Check if all files in this submission are done (approved or skipped)
-      const allFileIds = (item.files ?? []).map(f => f.gdrive_file_id);
-      const newApproved = new Set(approvedFileIds).add(file.gdrive_file_id);
-      const allDone = allFileIds.every(id => newApproved.has(id) || skippedFileIds.has(id));
+      const files = item.files ?? [];
+      const allDone = files.every(
+        candidate =>
+          Boolean(candidate.new_file_path?.trim()) &&
+          (
+            candidate.gdrive_file_id === file.gdrive_file_id ||
+            isFileApproved(candidate) ||
+            approvedFileIds.has(candidate.gdrive_file_id)
+          )
+      );
       if (allDone) {
-        // Approve the submission
-        await fetch(APPWRITE_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "approve submission", submission_id: item.id }),
-        });
-        onSubmissionDone(item.id);
+        await approveSubmission(item.id);
       }
+      await queueMove();
+      if (allDone) onSubmissionDone(item.id);
     } catch (err) {
-      setErrors(prev => ({ ...prev, [file.gdrive_file_id]: "Lỗi. Thử lại." }));
+      setErrors(prev => ({
+        ...prev,
+        [file.gdrive_file_id]: err instanceof Error ? err.message : "Lỗi. Thử lại.",
+      }));
     } finally {
       setFileLoading(file.gdrive_file_id, false);
     }
-  };
-
-  const handleSkipFile = (item: PendingItem, file: PendingFileItem) => {
-    setSkippedFileIds(prev => {
-      const s = new Set(prev).add(file.gdrive_file_id);
-      // Check if all done after skip
-      const allFileIds = (item.files ?? []).map(f => f.gdrive_file_id);
-      const allDone = allFileIds.every(id => approvedFileIds.has(id) || s.has(id));
-      if (allDone) onSubmissionDone(item.id);
-      return s;
-    });
   };
 
   const handleApproveAllFiles = async (item: PendingItem) => {
@@ -115,43 +156,43 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
 
     try {
       const files = item.files ?? [];
-      
-      // Approve all files
+      if (files.some(file => !file.new_file_path?.trim())) {
+        throw new Error("Cần lưu path cho tất cả file trước khi duyệt.");
+      }
+
+      const filesToApprove = files.filter(
+        file =>
+          !isFileApproved(file) &&
+          !approvedFileIds.has(file.gdrive_file_id)
+      );
+
       await Promise.all(
-        files.map(async (file) => {
-          // Skip already approved or skipped files
-          if (approvedFileIds.has(file.gdrive_file_id) || skippedFileIds.has(file.gdrive_file_id)) {
-            return;
-          }
-
-          const res = await fetch(APPWRITE_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "insert file path",
-              new_path: file.new_file_path || item.generatedPath,
-              approver: approverEmail,
-              is_approved: true,
-              file_id: file.gdrive_file_id,
-            }),
-          });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
+        filesToApprove.map(async file => {
+          await setFileApproved(file);
+          removeReturnedFile(file.gdrive_file_id);
           setApprovedFileIds(prev => new Set(prev).add(file.gdrive_file_id));
-          onFileApproved(item.id, item.name, file);
         })
       );
 
-      // Approve the submission
-      await fetch(APPWRITE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "approve submission", submission_id: item.id }),
-      });
-
-      onSubmissionDone(item.id);
+      const allFilesApproved = files.every(
+        file =>
+          Boolean(file.new_file_path?.trim()) &&
+          (
+            isFileApproved(file) ||
+            approvedFileIds.has(file.gdrive_file_id) ||
+            filesToApprove.some(approved => approved.gdrive_file_id === file.gdrive_file_id)
+          )
+      );
+      if (allFilesApproved) {
+        await approveSubmission(item.id);
+      }
+      await queueMove();
+      if (allFilesApproved) onSubmissionDone(item.id);
     } catch (err) {
-      setErrors(prev => ({ ...prev, [item.id]: "Lỗi. Thử lại." }));
+      setErrors(prev => ({
+        ...prev,
+        [item.id]: err instanceof Error ? err.message : "Lỗi. Thử lại.",
+      }));
     } finally {
       setSubmissionLoading(item.id, false);
     }
@@ -182,6 +223,9 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                   </div>
                   <div className="flex-1 min-w-0">
                     <span className="font-bold text-[14px] text-gray-900 block truncate">{item.name}</span>
+                    {errors[item.id] && (
+                      <span className="mt-1 block text-[11px] text-red-600">{errors[item.id]}</span>
+                    )}
                   </div>
                 </div>
 
@@ -199,7 +243,7 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                 {/* Approve all button (Desktop only) */}
                 <div className="hidden lg:flex lg:flex-[1] items-center justify-end">
                   <button
-                    disabled={loadingSubmissionIds.has(item.id)}
+                    disabled={loadingSubmissionIds.has(item.id) || (item.files ?? []).some(file => !file.new_file_path?.trim())}
                     onClick={() => handleApproveAllFiles(item)}
                     className="flex items-center justify-center w-7 h-7 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60 cursor-pointer"
                     title="Approve All"
@@ -221,7 +265,7 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                     Tổng số file: <span className="text-gray-800 font-bold">{item.totalFiles}</span>
                   </div>
                   <button
-                    disabled={loadingSubmissionIds.has(item.id)}
+                    disabled={loadingSubmissionIds.has(item.id) || (item.files ?? []).some(file => !file.new_file_path?.trim())}
                     onClick={() => handleApproveAllFiles(item)}
                     className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60 text-xs font-semibold cursor-pointer"
                     title="Approve All"
@@ -248,9 +292,7 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                   {item.files.map((file, nestedIdx) => {
                     const FileIcon = file.icon || File;
                     const isLoading = loadingFileIds.has(file.gdrive_file_id);
-                    const isApproved = approvedFileIds.has(file.gdrive_file_id);
-                    const isSkipped = skippedFileIds.has(file.gdrive_file_id);
-                    const isDone = isApproved || isSkipped;
+                    const isApproved = isFileApproved(file) || approvedFileIds.has(file.gdrive_file_id);
 
                     return (
                       <div key={file.gdrive_file_id || nestedIdx} className="flex flex-col lg:flex-row items-stretch lg:items-center relative gap-2 lg:gap-0 border-b border-dashed border-gray-100 lg:border-none pb-2 lg:pb-0 pt-2 lg:pt-0">
@@ -259,10 +301,10 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                         {/* File name */}
                         <div className="flex-1 lg:flex-[3] flex items-start gap-3 min-w-0 pr-0 lg:pr-4">
                           <div className="flex items-center justify-center shrink-0 bg-white z-10 py-1">
-                            <FileIcon size={18} className={isDone ? "text-gray-300" : "text-brand-blue"} />
+                            <FileIcon size={18} className={isApproved ? "text-gray-300" : "text-brand-blue"} />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className={`text-[14px] font-medium leading-tight ${isDone ? 'text-gray-300 line-through' : 'text-gray-700'}`}>
+                            <div className={`text-[14px] font-medium leading-tight ${isApproved ? 'text-gray-300 line-through' : 'text-gray-700'}`}>
                               {file.url ? (
                                 <a
                                   href={file.url}
@@ -276,6 +318,11 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                                 <span className="break-all">{file.name}</span>
                               )}
                             </div>
+                            {file.return_reason && (
+                              <div className="mt-1 text-[12px] text-amber-700">
+                                Lý do trả về: {file.return_reason}
+                              </div>
+                            )}
                             {/* Approver email/error (Mobile only) */}
                             {isApproved && (
                               <span className="lg:hidden mt-0.5 text-[11px] text-gray-400 block truncate">
@@ -333,27 +380,14 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
 
                         {/* Actions */}
                         <div className="w-full lg:w-auto lg:flex-[1] flex items-center justify-end gap-2 mt-1 lg:mt-0">
-                          {isDone ? (
-                            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                              isApproved
-                                ? 'bg-[#e6fcf5] text-[#0ca678]'
-                                : 'bg-gray-100 text-gray-400'
-                            }`}>
-                              {isApproved ? 'Approved' : 'Skipped'}
+                          {isApproved ? (
+                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[#e6fcf5] text-[#0ca678]">
+                              Approved
                             </span>
                           ) : (
                             <div className="flex gap-2 w-full lg:w-auto justify-end">
                               <button
-                                disabled={isLoading}
-                                onClick={() => handleSkipFile(item, file)}
-                                className="flex-1 lg:flex-none flex items-center justify-center w-auto lg:w-7 h-8 lg:h-7 rounded bg-[#ffe6e6] text-[#e03131] hover:bg-[#ffcccc] transition-colors disabled:opacity-40 px-3 lg:px-0 text-xs font-semibold lg:font-normal cursor-pointer"
-                                title="Skip"
-                              >
-                                <X size={16} className="mr-1 lg:mr-0" />
-                                <span className="lg:hidden">Bỏ qua</span>
-                              </button>
-                              <button
-                                disabled={isLoading}
+                                disabled={isLoading || isApproved || !file.new_file_path?.trim()}
                                 onClick={() => handleApproveFile(item, file)}
                                 className="flex-1 lg:flex-none flex items-center justify-center w-auto lg:w-7 h-8 lg:h-7 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60 px-3 lg:px-0 text-xs font-semibold lg:font-normal cursor-pointer"
                                 title="Approve"
@@ -366,7 +400,7 @@ export default function PendingTable({ data, approverEmail, onFileApproved, onSu
                                 ) : (
                                   <>
                                     <Check size={16} className="mr-1 lg:mr-0" />
-                                    <span className="lg:hidden">Duyệt</span>
+                                    <span className="lg:hidden">{file.new_file_path ? "Duyệt" : "Cần path"}</span>
                                   </>
                                 )}
                               </button>

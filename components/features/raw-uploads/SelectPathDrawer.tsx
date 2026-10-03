@@ -6,12 +6,20 @@ interface SelectPathDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   file: FileItem | null;
-  onMoveCompleted?: (file: FileItem) => void;
+  onPathSaved?: (file: FileItem, path: string) => void;
 }
 
 type Course = {
   id?: string;
   course_name: string;
+};
+
+type PathFormValues = {
+  subject: string;
+  customSubject: string;
+  semester: string;
+  year: string;
+  mainContent: string;
 };
 
 const getErrorMessage = (error: unknown) =>
@@ -42,17 +50,12 @@ export default function SelectPathDrawer({
   isOpen,
   onClose,
   file,
-  onMoveCompleted,
+  onPathSaved,
 }: SelectPathDrawerProps) {
   const [courses, setCourses] = useState<Course[]>([]);
-  const [subject, setSubject] = useState("");
-  const [customSubject, setCustomSubject] = useState("");
-  const [semester, setSemester] = useState("Học kỳ 1");
-  const [year, setYear] = useState("2024-2025");
-  const [mainContent, setMainContent] = useState("Bài giảng");
+  const [pathForm, setPathForm] = useState<{ fileId: string; values: PathFormValues } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingCourses, setIsLoadingCourses] = useState(false);
-  const [driveLink, setDriveLink] = useState("");
   const DRIVE_ROOT_FOLDER_ID = "1QCtQ_o2dOxgTUWlZ8Avnrnnr5q4Jcgzc";
   const DRIVE_ROOT_FOLDER_LINK = `https://drive.google.com/drive/folders/${DRIVE_ROOT_FOLDER_ID}`;
 
@@ -77,11 +80,6 @@ export default function SelectPathDrawer({
           }
           if (result.data) {
             setCourses(result.data);
-            if (result.data.length > 0) {
-              setSubject(result.data[0].course_name);
-            } else {
-              setSubject("");
-            }
           }
         } catch (err) {
           console.error("Lỗi khi tải danh sách môn học:", err);
@@ -95,28 +93,51 @@ export default function SelectPathDrawer({
 
   if (!isOpen) return null;
 
+  const pathSegments = file?.new_file_path?.split("/") ?? [];
+  const savedSemester = pathSegments[2]?.match(/^(HK1|HK2|HK Hè)\s+(.+)$/);
+  const savedSubject = pathSegments.length >= 4 ? pathSegments[0] : "";
+  const savedSubjectInCourses = courses.find(
+    (course) => course.course_name.trim().toLowerCase() === savedSubject.trim().toLowerCase()
+  );
+  const defaultPathForm: PathFormValues = {
+    subject: savedSubjectInCourses?.course_name ?? courses[0]?.course_name ?? "",
+    customSubject: savedSubject && !savedSubjectInCourses ? savedSubject : "",
+    semester: savedSemester
+      ? savedSemester[1] === "HK1" ? "Học kỳ 1" : savedSemester[1] === "HK2" ? "Học kỳ 2" : "Học kỳ Hè"
+      : "Học kỳ 1",
+    year: savedSemester?.[2] ?? "2024-2025",
+    mainContent: pathSegments[1] ?? "Bài giảng",
+  };
+  const form = pathForm && pathForm.fileId === file?.id ? pathForm.values : defaultPathForm;
+  const updateForm = (key: keyof PathFormValues, value: string) => {
+    if (!file) return;
+    setPathForm({
+      fileId: file.id,
+      values: { ...form, [key]: value },
+    });
+  };
+
   // Format các giá trị thành đường dẫn chuẩn
-  const selectedSubject = (customSubject.trim() || subject).trim();
+  const selectedSubject = (form.customSubject.trim() || form.subject).trim();
   const shortSemester =
-    semester === "Học kỳ 1" ? "HK1" : semester === "Học kỳ 2" ? "HK2" : "HK Hè";
+    form.semester === "Học kỳ 1" ? "HK1" : form.semester === "Học kỳ 2" ? "HK2" : "HK Hè";
   const basePath = selectedSubject
-    ? `${selectedSubject}/${mainContent}/${shortSemester} ${year}`
+    ? `${selectedSubject}/${form.mainContent}/${shortSemester} ${form.year}`
     : "";
   const destinationPath = file && selectedSubject ? `${basePath}/${file.name}` : "";
 
   const handleSubmit = async () => {
     if (!file || !selectedSubject) return;
 
-    if ([selectedSubject, mainContent, shortSemester, year].some((part) => part.includes("/"))) {
+    if ([selectedSubject, form.mainContent, shortSemester, form.year].some((part) => part.includes("/"))) {
       alert("Tên folder không được chứa ký tự /.");
       return;
     }
 
     try {
       setIsSubmitting(true);
-      setDriveLink("");
 
-      const trimmedCustomSubject = customSubject.trim();
+      const trimmedCustomSubject = form.customSubject.trim();
       const subjectExists = courses.some(
         (course) => course.course_name.trim().toLowerCase() === selectedSubject.toLowerCase()
       );
@@ -135,54 +156,23 @@ export default function SelectPathDrawer({
           if (exists) return prev;
           return [...prev, { course_name: trimmedCustomSubject }];
         });
-        setSubject(trimmedCustomSubject);
-        setCustomSubject("");
       }
 
-      const canMoveImmediately =
-        file.status === "approved" || file.submissionFileCount === 1;
-
-      const result = await postJson("/api/appwrite", {
-          action: "insert file path",
-          new_path: destinationPath,
-          approver: "path-selector",
-          is_approved: canMoveImmediately,
-          file_id: file.id,
-          subject: selectedSubject,
-          folder_path: basePath,
-          parent_folder_id: DRIVE_ROOT_FOLDER_ID,
-          parent_folder_link: DRIVE_ROOT_FOLDER_LINK,
+      await postJson("/api/appwrite", {
+        action: "insert file path",
+        new_path: destinationPath,
+        approver: "path-selector",
+        is_approved: false,
+        return_reason: "",
+        file_id: file.id,
+        subject: selectedSubject,
+        folder_path: basePath,
+        parent_folder_id: DRIVE_ROOT_FOLDER_ID,
+        parent_folder_link: DRIVE_ROOT_FOLDER_LINK,
       });
 
-      if (canMoveImmediately) {
-        await postJson("/api/appwrite", {
-          action: "approve submission",
-          submission_id: file.submissionId,
-        });
-
-        await postJson("/api/appwrite-move", {});
-        onMoveCompleted?.(file);
-      }
-
-      const updatedFile = Array.isArray(result.data) ? result.data[0] : undefined;
-      const returnedLink =
-        updatedFile?.web_view_link ||
-        updatedFile?.web_link_view ||
-        result.drive_link ||
-        result.web_view_link ||
-        result.folder_link ||
-        result.gdrive_folder_link ||
-        result.link ||
-        result.path ||
-        file.url ||
-        `https://drive.google.com/file/d/${encodeURIComponent(file.id)}/view`;
-      setDriveLink(returnedLink);
-
-      console.log("Response từ API khi Submit:", result);
-      alert(canMoveImmediately
-        ? `Đã đưa tác vụ tạo folder và chuyển file vào hàng đợi. Appwrite đang xử lý nền.\n\n${destinationPath}`
-        : `Đã lưu đường dẫn. Submission có nhiều file nên cần chọn path cho tất cả file trước khi duyệt và chuyển.\n\n${destinationPath}`
-      );
+      setPathForm(null);
+      onPathSaved?.(file, destinationPath);
     } catch (err: unknown) {
       console.error("Lỗi khi submit:", err);
       alert(`Đã xảy ra lỗi: ${getErrorMessage(err)}`);
@@ -228,8 +218,18 @@ export default function SelectPathDrawer({
             </label>
             <div className="relative">
               <select
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
+                value={form.subject}
+                onChange={(e) => {
+                  if (!file) return;
+                  setPathForm({
+                    fileId: file.id,
+                    values: {
+                      ...form,
+                      subject: e.target.value,
+                      customSubject: "",
+                    },
+                  });
+                }}
                 className="w-full bg-[#dbdbdb] border-none rounded-md p-3 pr-10 text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 appearance-none font-medium"
               >
                 {isLoadingCourses ? (
@@ -259,8 +259,8 @@ export default function SelectPathDrawer({
               Môn mới (nếu muốn tạo)
             </label>
             <input
-              value={customSubject}
-              onChange={(e) => setCustomSubject(e.target.value)}
+              value={form.customSubject}
+              onChange={(e) => updateForm("customSubject", e.target.value)}
               placeholder="Nhập tên môn mới để tạo folder"
               className="w-full bg-[#dbdbdb] rounded-md p-3 text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
             />
@@ -276,8 +276,8 @@ export default function SelectPathDrawer({
               </label>
               <div className="relative">
                 <select
-                  value={semester}
-                  onChange={(e) => setSemester(e.target.value)}
+                  value={form.semester}
+                  onChange={(e) => updateForm("semester", e.target.value)}
                   className="w-full bg-[#dbdbdb] border-none rounded-md p-3 pr-10 text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 appearance-none font-medium"
                 >
                   <option value="Học kỳ 1">Học kỳ 1</option>
@@ -297,10 +297,13 @@ export default function SelectPathDrawer({
               </label>
               <div className="relative">
                 <select
-                  value={year}
-                  onChange={(e) => setYear(e.target.value)}
+                  value={form.year}
+                  onChange={(e) => updateForm("year", e.target.value)}
                   className="w-full bg-[#dbdbdb] border-none rounded-md p-3 pr-10 text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 appearance-none font-medium"
                 >
+                  {!["2023-2024", "2024-2025", "2025-2026"].includes(form.year) && (
+                    <option value={form.year}>{form.year}</option>
+                  )}
                   <option value="2023-2024">2023-2024</option>
                   <option value="2024-2025">2024-2025</option>
                   <option value="2025-2026">2025-2026</option>
@@ -320,8 +323,8 @@ export default function SelectPathDrawer({
             </label>
             <div className="relative">
               <select
-                value={mainContent}
-                onChange={(e) => setMainContent(e.target.value)}
+                value={form.mainContent}
+                onChange={(e) => updateForm("mainContent", e.target.value)}
                 className="w-full bg-[#dbdbdb] border-none rounded-md p-3 pr-10 text-gray-700 outline-none focus:ring-2 focus:ring-blue-500 appearance-none font-medium"
               >
                 <option value="Thực hành">Thực hành</option>
@@ -355,26 +358,9 @@ export default function SelectPathDrawer({
               disabled={isSubmitting || !file || !selectedSubject}
               className="w-full bg-[#cccccc] hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700 font-bold py-3 rounded-md transition-colors text-[15px]"
             >
-              {isSubmitting ? "Đang xử lý..." : "Submit"}
+              {isSubmitting ? "Đang lưu..." : file?.new_file_path ? "Update path" : "Submit"}
             </button>
           </div>
-
-          {driveLink && (
-            <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900">
-              <div className="font-semibold mb-1">Mở file trên Google Drive</div>
-              <p className="mb-2 text-xs text-green-800">
-                Mở link rồi xem mục “Vị trí” trong phần chi tiết của Drive để biết file đang nằm trong folder nào.
-              </p>
-              <a
-                href={driveLink}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="text-blue-700 underline break-all"
-              >
-                {driveLink}
-              </a>
-            </div>
-          )}
         </div>
 
         <div className="mt-8 text-center text-blue-600 font-bold text-xl tracking-wide">

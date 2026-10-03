@@ -10,21 +10,37 @@ import {
   AlertCircle,
   ExternalLink,
   Folder,
+  X,
 } from 'lucide-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import { getReturnedFiles, saveReturnedFile } from '@/app/approved-files/returned-files';
 
 // --- Khớp cấu trúc JSON API trả về ---
 type ApiSubmittedFile = {
+  gdrive_file_id?: string;
+  file_id?: string;
+  id?: string;
+  $id?: string;
+  name?: string;
+  web_view_link?: string;
+  web_link_view?: string;
+  new_file_path?: string | null;
+  destination_folder_link?: string | null;
+  is_approved?: boolean | number | string;
+  return_reason?: string;
+};
+
+type ApprovedFile = ApiSubmittedFile & {
   gdrive_file_id: string;
   name: string;
-  web_view_link: string;
-  new_file_path: string | null;
-  destination_folder_link: string | null;
 };
 
 type ApiSubmission = {
   form_submissions_id: number;
-  submitted_files: ApiSubmittedFile[];
+  id?: number;
+  name?: string;
+  submitted_files?: ApiSubmittedFile[];
+  files?: ApiSubmittedFile[];
 };
 
 type ApiResponse = {
@@ -35,7 +51,7 @@ type ApiResponse = {
 type GroupedSubmission = {
   submissionId: number;
   submissionName: string;
-  files: ApiSubmittedFile[];
+  files: ApprovedFile[];
 };
 
 function getIcon(name: string) {
@@ -50,6 +66,14 @@ function PageContent() {
   const [groups, setGroups] = useState<GroupedSubmission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [returningFile, setReturningFile] = useState<{
+    file: ApprovedFile;
+    submissionId: string;
+    submissionName: string;
+  } | null>(null);
+  const [returnReason, setReturnReason] = useState('');
+  const [returnError, setReturnError] = useState<string | null>(null);
+  const [isReturning, setIsReturning] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -76,22 +100,31 @@ function PageContent() {
 
         if (isMounted) {
           if (result.data && Array.isArray(result.data)) {
-            const parsedGroups = result.data
-              .map((item: any) => {
-                const files = item.submitted_files || item.files || [];
-                return {
-                  submissionId: item.form_submissions_id || item.id,
-                  submissionName: item.name || `Submission #${item.form_submissions_id || item.id}`,
-                  files: files.map((f: any) => ({
-                    gdrive_file_id: f.gdrive_file_id,
-                    name: f.name,
-                    web_view_link: f.web_view_link || f.web_link_view || '',
-                    new_file_path: f.new_file_path || null,
-                    destination_folder_link: f.destination_folder_link || null,
-                  })),
-                };
-              })
-              .filter((group: any) => group.files.length > 0);
+            const parsedGroups: GroupedSubmission[] = [];
+            const returnedIds = new Set(getReturnedFiles().map(entry => entry.fileId));
+            for (const item of result.data) {
+              const files: ApiSubmittedFile[] = item.submitted_files || item.files || [];
+              const approvedFiles: ApprovedFile[] = files.flatMap(file => {
+                const fileId = file.gdrive_file_id || file.file_id || file.id || file.$id;
+                if (!fileId || returnedIds.has(fileId)) return [];
+                return [{
+                  ...file,
+                  gdrive_file_id: fileId,
+                  name: file.name || fileId,
+                  web_view_link: file.web_view_link || file.web_link_view || "",
+                  new_file_path: file.new_file_path || null,
+                  destination_folder_link: file.destination_folder_link || null,
+                }];
+              });
+              if (approvedFiles.length) {
+                const submissionId = item.form_submissions_id || item.id || 0;
+                parsedGroups.push({
+                  submissionId,
+                  submissionName: item.name || `Submission #${submissionId}`,
+                  files: approvedFiles,
+                });
+              }
+            }
 
             setGroups(parsedGroups);
           } else {
@@ -117,6 +150,63 @@ function PageContent() {
       isMounted = false;
     };
   }, []);
+
+  const handleReturnFile = async () => {
+    if (!returningFile || !returnReason.trim()) {
+      setReturnError('Vui lòng nhập lý do trả file.');
+      return;
+    }
+
+    setIsReturning(true);
+    setReturnError(null);
+    try {
+      if (returningFile.file.new_file_path?.trim()) {
+        const response = await fetch('/api/appwrite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'insert file path',
+            new_path: returningFile.file.new_file_path,
+            approver: 'file-return',
+            is_approved: null,
+            file_id: returningFile.file.gdrive_file_id,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok || result.error) {
+          const detail = typeof result.detail === 'string'
+            ? result.detail
+            : result.detail
+              ? JSON.stringify(result.detail)
+              : result.error;
+          throw new Error(detail || `HTTP ${response.status}`);
+        }
+      }
+
+      saveReturnedFile({
+        fileId: returningFile.file.gdrive_file_id,
+        submissionId: returningFile.submissionId,
+        submissionName: returningFile.submissionName,
+        name: returningFile.file.name,
+        url: returningFile.file.web_view_link,
+        new_file_path: returningFile.file.new_file_path ?? undefined,
+        return_reason: returnReason.trim(),
+        is_approved: null,
+      });
+      setGroups(current => current
+        .map(group => ({
+          ...group,
+          files: group.files.filter(file => file.gdrive_file_id !== returningFile.file.gdrive_file_id),
+        }))
+        .filter(group => group.files.length > 0));
+      setReturningFile(null);
+      setReturnReason('');
+    } catch (err: unknown) {
+      setReturnError(err instanceof Error ? err.message : 'Không thể trả file.');
+    } finally {
+      setIsReturning(false);
+    }
+  };
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
@@ -227,13 +317,28 @@ function PageContent() {
                           )}
                         </div>
 
-                        <div className="flex-[2] flex items-center justify-end">
+                        <div className="flex-[2] flex items-center justify-end gap-3">
                           <div className="flex items-center gap-1.5 bg-[#e6fcf5] px-2.5 py-0.5 rounded-full border border-[#c3fae8]">
                             <CheckCircle2 size={12} className="text-[#0ca678]" fill="#0ca678" color="white" />
-                            <span className="uppercase text-[#0ca678] text-[10px] font-bold tracking-wide">
-                              Approved
-                            </span>
+                            <span className="uppercase text-[#0ca678] text-[10px] font-bold tracking-wide">Approved</span>
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReturningFile({
+                                file,
+                                submissionId: String(group.submissionId),
+                                submissionName: group.submissionName,
+                              });
+                              setReturnReason('');
+                              setReturnError(null);
+                            }}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100"
+                            title="Trả file về Pending Approval"
+                            aria-label={`Trả ${file.name} về Pending Approval`}
+                          >
+                            <X size={15} />
+                          </button>
                         </div>
                       </div>
                     );
@@ -244,6 +349,54 @@ function PageContent() {
           )}
         </div>
       </div>
+
+      {returningFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="return-file-title"
+            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+          >
+            <h2 id="return-file-title" className="text-lg font-bold text-gray-900">
+              Trả file về Pending Approval
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">{returningFile.file.name}</p>
+            <label htmlFor="return-reason" className="mt-4 block text-sm font-medium text-gray-700">
+              Lý do trả file
+            </label>
+            <textarea
+              id="return-reason"
+              value={returnReason}
+              onChange={event => setReturnReason(event.target.value)}
+              rows={4}
+              required
+              disabled={isReturning}
+              className="mt-1 w-full rounded-lg border border-gray-300 p-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              placeholder="Nhập lý do cần chỉnh sửa..."
+            />
+            {returnError && <p className="mt-2 text-sm text-red-600">{returnError}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={isReturning}
+                onClick={() => setReturningFile(null)}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={isReturning || !returnReason.trim()}
+                onClick={handleReturnFile}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isReturning ? 'Đang trả file...' : 'Xác nhận trả file'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
