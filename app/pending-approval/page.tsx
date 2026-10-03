@@ -5,10 +5,40 @@ import { FileText, FileSpreadsheet, File, Archive } from 'lucide-react';
 import PendingTable, { PendingItem, PendingFileItem } from '@/components/features/pending-approval/PendingTable';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '../context/AuthContext';
+import { getReturnedFiles } from '@/app/approved-files/returned-files';
 
 const APPWRITE_URL = '/api/appwrite';
-const APPWRITE_ENV = process.env.NEXT_PUBLIC_APPWRITE_ENV ?? 'production';
-const APPROVED_FILES_KEY = `approvedFiles:${APPWRITE_ENV}`;
+
+type ApiPendingFile = {
+  gdrive_file_id?: string;
+  file_id?: string;
+  id?: string;
+  $id?: string;
+  name?: string;
+  mime_type?: string;
+  web_view_link?: string;
+  web_link_view?: string;
+  new_file_path?: string;
+  destination_folder_link?: string;
+  is_approved?: boolean | number | string;
+  return_reason?: string;
+};
+
+type ApiPendingSubmission = {
+  form_submissions_id?: string | number;
+  id?: string | number;
+  name?: string;
+  mime_type?: string;
+  total_file?: number;
+  submitted_files?: ApiPendingFile[];
+  files?: ApiPendingFile[];
+};
+
+type PendingResponse = {
+  data?: ApiPendingSubmission[];
+  submissions?: ApiPendingSubmission[];
+  error?: string;
+};
 
 function getIcon(name: string, mimeType?: string) {
   const ext = name?.split('.').pop()?.toLowerCase();
@@ -19,88 +49,103 @@ function getIcon(name: string, mimeType?: string) {
   return File;
 }
 
-export type ApprovedFileEntry = {
-  submissionId: string;
-  submissionName: string;
-  file: PendingFileItem;
-  approvedAt: string;
-};
-
 function PageContent() {
   const { user } = useAuth();
   const [submissions, setSubmissions] = useState<PendingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchSubmissions = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(APPWRITE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'fetch unapproved submissions' }),
-        cache: 'no-store',
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
-      const rawList = json.data ?? json.submissions ?? (Array.isArray(json) ? json : []);
+  useEffect(() => {
+    let isMounted = true;
 
-      const items: PendingItem[] = rawList.map((sub: any) => {
-        const files = sub.submitted_files ?? sub.files ?? [];
-        const firstFileWithPath = files.find(
-          (file: any) => file.new_file_path || file.destination_folder_link
-        );
+    const fetchSubmissions = async () => {
+      try {
+        const res = await fetch(APPWRITE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'fetch unapproved submissions' }),
+          cache: 'no-store',
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json() as PendingResponse | ApiPendingSubmission[];
+        if (!Array.isArray(json) && json.error) throw new Error(json.error);
+        const rawList = Array.isArray(json)
+          ? json
+          : json.data ?? json.submissions ?? [];
 
-        return {
-          id: String(sub.form_submissions_id ?? sub.id),
-          name: sub.name ?? `Submission #${sub.form_submissions_id}`,
-          generatedPath:
-            firstFileWithPath?.new_file_path ??
-            firstFileWithPath?.destination_folder_link ??
-            sub.gdrive_folder_link ??
-            '',
-          totalFiles: sub.total_file ?? files.length,
-          icon: getIcon(sub.name ?? '', sub.mime_type),
-          files: files.map((f: any) => ({
-            gdrive_file_id: f.gdrive_file_id,
-            name: f.name,
-            icon: getIcon(f.name ?? '', f.mime_type),
-            web_view_link: f.web_view_link ?? f.web_link_view ?? '',
-            url: f.web_view_link ?? f.web_link_view ?? '',
-            new_file_path: f.new_file_path ?? '',
-            destination_folder_link: f.destination_folder_link ?? '',
-          })),
-        };
-      });
+        const items: PendingItem[] = rawList.flatMap((sub) => {
+          const files = sub.submitted_files ?? sub.files ?? [];
+          const id = String(sub.form_submissions_id ?? sub.id ?? "");
+          if (!id) return [];
+          const mappedFiles: PendingFileItem[] = files.flatMap((f) => {
+            const fileId = f.gdrive_file_id || f.file_id || f.id || f.$id;
+            if (!fileId) return [];
+            return [{
+              gdrive_file_id: fileId,
+              name: f.name ?? fileId,
+              icon: getIcon(f.name ?? '', f.mime_type),
+              web_view_link: f.web_view_link ?? f.web_link_view ?? '',
+              url: f.web_view_link ?? f.web_link_view ?? '',
+              new_file_path: f.new_file_path ?? '',
+              destination_folder_link: f.destination_folder_link ?? '',
+              is_approved: f.is_approved === true || f.is_approved === 1 || f.is_approved === 'true',
+              return_reason: f.return_reason ?? '',
+            }];
+          });
 
-      setSubmissions(items);
-    } catch (e: any) {
-      setError(`Không thể tải danh sách: ${e?.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+          return [{
+            id,
+            name: sub.name ?? `Submission #${id}`,
+            totalFiles: sub.total_file ?? mappedFiles.length,
+            icon: getIcon(sub.name ?? '', sub.mime_type),
+            files: mappedFiles,
+          }];
+        }).filter((item) => item.files.length > 0);
 
-  useEffect(() => { fetchSubmissions(); }, []);
+        const mergedSubmissions = new Map(items.map(item => [item.id, item]));
+        for (const returned of getReturnedFiles()) {
+          const submission = mergedSubmissions.get(returned.submissionId) ?? {
+            id: returned.submissionId,
+            name: returned.submissionName,
+            totalFiles: 0,
+            icon: getIcon(returned.name),
+            files: [],
+          };
+          const returnedFile: PendingFileItem = {
+            gdrive_file_id: returned.fileId,
+            name: returned.name,
+            icon: getIcon(returned.name),
+            web_view_link: returned.url,
+            url: returned.url,
+            new_file_path: returned.new_file_path ?? '',
+            is_approved: null,
+            return_reason: returned.return_reason,
+          };
+          const files = (submission.files ?? []).some(file => file.gdrive_file_id === returned.fileId)
+            ? (submission.files ?? []).map(file => file.gdrive_file_id === returned.fileId ? returnedFile : file)
+            : [...(submission.files ?? []), returnedFile];
+          mergedSubmissions.set(returned.submissionId, {
+            ...submission,
+            files,
+            totalFiles: files.length,
+          });
+        }
 
-  // Called when a single file is approved → move to approved list
-  const handleFileApproved = (submissionId: string, submissionName: string, file: PendingFileItem) => {
-    const entry: ApprovedFileEntry = {
-      submissionId,
-      submissionName,
-      file,
-      approvedAt: new Date().toISOString(),
+        if (isMounted) setSubmissions(Array.from(mergedSubmissions.values()));
+      } catch (e: unknown) {
+        if (isMounted) {
+          setError(`Không thể tải danh sách: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      } finally {
+        if (isMounted) setLoading(false);
+      }
     };
 
-    const stored = localStorage.getItem(APPROVED_FILES_KEY);
-    const current: ApprovedFileEntry[] = stored ? JSON.parse(stored) : [];
-    const withoutDuplicate = current.filter(
-      approved => approved.file.gdrive_file_id !== file.gdrive_file_id
-    );
-    localStorage.setItem(APPROVED_FILES_KEY, JSON.stringify([...withoutDuplicate, entry]));
-  };
+    void fetchSubmissions();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Called when all files in a submission are done → remove submission from pending
   const handleSubmissionDone = (submissionId: string) => {
@@ -121,7 +166,6 @@ function PageContent() {
         <PendingTable
           data={submissions}
           approverEmail={user?.email ?? ''}
-          onFileApproved={handleFileApproved}
           onSubmissionDone={handleSubmissionDone}
         />
       )}
