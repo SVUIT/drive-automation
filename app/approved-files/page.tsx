@@ -1,6 +1,6 @@
-﻿'use client';
+'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   FileText,
   FileSpreadsheet,
@@ -11,9 +11,13 @@ import {
   ExternalLink,
   Folder,
   X,
+  Search,
 } from 'lucide-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { getReturnedFiles, saveReturnedFile } from '@/app/approved-files/returned-files';
+import { useSearch, SearchableItem } from '@/app/context/SearchContext';
+import { matchesSearch } from '@/app/lib/search-utils';
+import HighlightText from '@/components/common/HighlightText';
 
 // --- Khớp cấu trúc JSON API trả về ---
 type ApiSubmittedFile = {
@@ -74,6 +78,8 @@ function PageContent() {
   const [returnReason, setReturnReason] = useState('');
   const [returnError, setReturnError] = useState<string | null>(null);
   const [isReturning, setIsReturning] = useState(false);
+
+  const { searchQuery, scope, clearSearch, registerItems, unregisterItems } = useSearch();
 
   useEffect(() => {
     let isMounted = true;
@@ -151,6 +157,81 @@ function PageContent() {
     };
   }, []);
 
+  // Register items for global search
+  useEffect(() => {
+    const items: SearchableItem[] = groups.flatMap(group => [
+      {
+        id: `approved-group-${group.submissionId}`,
+        title: group.submissionName,
+        subtitle: `${group.files.length} file(s)`,
+        category: 'approved-files' as const,
+        categoryLabel: 'Approved',
+        route: '/approved-files',
+        isSubmissionGroup: true,
+      },
+      ...group.files.map(file => ({
+        id: `approved-file-${file.gdrive_file_id}`,
+        title: file.name,
+        subtitle: group.submissionName,
+        path: file.new_file_path || undefined,
+        url: file.web_view_link,
+        destinationFolderLink: file.destination_folder_link || undefined,
+        category: 'approved-files' as const,
+        categoryLabel: 'Approved',
+        route: '/approved-files',
+        isSubmissionGroup: false,
+      })),
+    ]);
+
+    registerItems('approved-files', items);
+    return () => unregisterItems('approved-files');
+  }, [groups, registerItems, unregisterItems]);
+
+  // Filter groups based on search
+  const filteredGroups: GroupedSubmission[] = useMemo(() => {
+    if (!searchQuery.trim()) return groups;
+
+    return groups
+      .map((group): GroupedSubmission | null => {
+        const groupMatches =
+          scope === 'submissions' || scope === 'all'
+            ? matchesSearch(group.submissionName, searchQuery) ||
+              matchesSearch(String(group.submissionId), searchQuery)
+            : false;
+
+        const matchingFiles = group.files.filter(file => {
+          if (scope === 'files') {
+            return matchesSearch(file.name, searchQuery);
+          }
+          if (scope === 'paths') {
+            return matchesSearch(file.new_file_path, searchQuery);
+          }
+          if (scope === 'submissions') {
+            return groupMatches;
+          }
+          // scope === 'all'
+          return (
+            matchesSearch(file.name, searchQuery) ||
+            matchesSearch(file.new_file_path, searchQuery) ||
+            groupMatches
+          );
+        });
+
+        if (matchingFiles.length > 0) {
+          return {
+            ...group,
+            files: matchingFiles,
+          };
+        }
+        return null;
+      })
+      .filter((g): g is GroupedSubmission => g !== null);
+  }, [groups, searchQuery, scope]);
+
+  const totalMatchingFiles = useMemo(() => {
+    return filteredGroups.reduce((acc, g) => acc + g.files.length, 0);
+  }, [filteredGroups]);
+
   const handleReturnFile = async () => {
     if (!returningFile || !returnReason.trim()) {
       setReturnError('Vui lòng nhập lý do trả file.');
@@ -221,6 +302,25 @@ function PageContent() {
         </div>
       </div>
 
+      {/* Active search filter banner */}
+      {searchQuery && (
+        <div className="flex items-center justify-between gap-3 bg-blue-50/80 border border-blue-200 text-blue-900 px-4 py-2.5 rounded-lg mb-6 text-[13px] animate-in fade-in duration-150">
+          <div className="flex items-center gap-2 min-w-0">
+            <Search size={15} className="text-blue-600 shrink-0" />
+            <span className="truncate">
+              Bộ lọc: <strong>&ldquo;{searchQuery}&rdquo;</strong> • Tìm thấy <strong>{totalMatchingFiles}</strong> tệp trong <strong>{filteredGroups.length}</strong> submission
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={clearSearch}
+            className="text-xs font-semibold text-blue-600 hover:text-blue-800 underline shrink-0 cursor-pointer"
+          >
+            Xóa bộ lọc
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="mb-6 p-4 rounded-lg bg-red-50 border border-red-200 flex items-center gap-3 text-red-700 text-sm">
           <AlertCircle size={18} className="shrink-0" />
@@ -241,12 +341,35 @@ function PageContent() {
             <div className="py-12 text-center text-gray-400 text-[14px]">
               Đang tải danh sách file đã duyệt...
             </div>
-          ) : groups.length === 0 ? (
-            <div className="py-12 text-center text-gray-500 text-[14px]">
-              Chưa có tệp nào được phê duyệt.
+          ) : filteredGroups.length === 0 ? (
+            <div className="py-12 px-4 text-center flex flex-col items-center justify-center">
+              {searchQuery ? (
+                <>
+                  <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2.5">
+                    <Search size={20} />
+                  </div>
+                  <p className="text-gray-800 font-medium text-[15px] mb-1">
+                    Không tìm thấy tệp đã duyệt phù hợp
+                  </p>
+                  <p className="text-gray-500 text-[13px] max-w-sm mb-3">
+                    Không có kết quả nào khớp với &ldquo;{searchQuery}&rdquo;. Thử tìm kiếm với tên tệp hoặc đường dẫn khác.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={clearSearch}
+                    className="px-3.5 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer"
+                  >
+                    Xóa bộ lọc tìm kiếm
+                  </button>
+                </>
+              ) : (
+                <div className="text-gray-500 text-[14px]">
+                  Chưa có tệp nào được phê duyệt.
+                </div>
+              )}
             </div>
           ) : (
-            groups.map((group) => (
+            filteredGroups.map((group) => (
               <div key={group.submissionId} className="flex flex-col">
                 <div className="flex py-3.5 px-6 items-center bg-[#fafafa]">
                   <div className="flex-[4] flex items-center pr-4">
@@ -254,7 +377,7 @@ function PageContent() {
                       <File size={18} className="text-blue-600" />
                     </div>
                     <span className="font-bold text-[14px] text-gray-900 truncate">
-                      {group.submissionName}
+                      <HighlightText text={group.submissionName} query={searchQuery} />
                     </span>
                   </div>
                   <div className="flex-[4] text-[12px] text-gray-400">
@@ -285,12 +408,14 @@ function PageContent() {
                               className="text-[13px] font-medium text-gray-800 hover:text-blue-600 truncate inline-flex items-center gap-1 group"
                               title={file.name}
                             >
-                              <span className="truncate">{file.name}</span>
+                              <span className="truncate">
+                                <HighlightText text={file.name} query={searchQuery} />
+                              </span>
                               <ExternalLink size={12} className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-blue-500" />
                             </a>
                           ) : (
                             <span className="text-[13px] font-medium text-gray-700 truncate" title={file.name}>
-                              {file.name}
+                              <HighlightText text={file.name} query={searchQuery} />
                             </span>
                           )}
                         </div>
@@ -305,12 +430,14 @@ function PageContent() {
                               title={file.new_file_path || 'Mở thư mục trên Google Drive'}
                             >
                               <Folder size={13} className="shrink-0 text-amber-500" />
-                              <span className="truncate">{file.new_file_path || 'Mở thư mục đích'}</span>
+                              <span className="truncate">
+                                <HighlightText text={file.new_file_path || 'Mở thư mục đích'} query={searchQuery} />
+                              </span>
                               <ExternalLink size={11} className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                             </a>
                           ) : file.new_file_path ? (
                             <span className="truncate text-gray-400" title={file.new_file_path}>
-                              {file.new_file_path}
+                              <HighlightText text={file.new_file_path} query={searchQuery} />
                             </span>
                           ) : (
                             <span className="text-gray-300 italic">Chưa chỉ định thư mục đích</span>
@@ -333,7 +460,7 @@ function PageContent() {
                               setReturnReason('');
                               setReturnError(null);
                             }}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100 cursor-pointer"
                             title="Trả file về Pending Approval"
                             aria-label={`Trả ${file.name} về Pending Approval`}
                           >
@@ -381,7 +508,7 @@ function PageContent() {
                 type="button"
                 disabled={isReturning}
                 onClick={() => setReturningFile(null)}
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 disabled:opacity-50 cursor-pointer"
               >
                 Hủy
               </button>
@@ -389,7 +516,7 @@ function PageContent() {
                 type="button"
                 disabled={isReturning || !returnReason.trim()}
                 onClick={handleReturnFile}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
               >
                 {isReturning ? 'Đang trả file...' : 'Xác nhận trả file'}
               </button>

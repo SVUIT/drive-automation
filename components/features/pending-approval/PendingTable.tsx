@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState } from "react";
-import { Check, File } from "lucide-react";
+import { Check, File, Search } from "lucide-react";
 import { removeReturnedFile } from "@/app/approved-files/returned-files";
+import HighlightText from "@/components/common/HighlightText";
 
 export type PendingFileItem = {
   gdrive_file_id: string;
@@ -29,6 +30,8 @@ export type PendingItem = {
 interface PendingTableProps {
   data: PendingItem[];
   approverEmail: string;
+  searchQuery?: string;
+  onClearSearch?: () => void;
   onSubmissionDone: (submissionId: string) => void;
 }
 
@@ -55,7 +58,7 @@ const postJson = async (url: string, body: unknown) => {
   }
 };
 
-export default function PendingTable({ data, approverEmail, onSubmissionDone }: PendingTableProps) {
+export default function PendingTable({ data, approverEmail, searchQuery = '', onClearSearch, onSubmissionDone }: PendingTableProps) {
   const [loadingFileIds, setLoadingFileIds] = useState<Set<string>>(new Set());
   const [loadingSubmissionIds, setLoadingSubmissionIds] = useState<Set<string>>(new Set());
   const [approvedFileIds, setApprovedFileIds] = useState<Set<string>>(new Set());
@@ -222,7 +225,9 @@ export default function PendingTable({ data, approverEmail, onSubmissionDone }: 
                     <IconComponent size={20} className="text-brand-blue" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <span className="font-bold text-[14px] text-gray-900 block truncate">{item.name}</span>
+                    <span className="font-bold text-[14px] text-gray-900 block truncate">
+                      <HighlightText text={item.name} query={searchQuery} />
+                    </span>
                     {errors[item.id] && (
                       <span className="mt-1 block text-[11px] text-red-600">{errors[item.id]}</span>
                     )}
@@ -312,15 +317,17 @@ export default function PendingTable({ data, approverEmail, onSubmissionDone }: 
                                   rel="noopener noreferrer"
                                   className="hover:text-blue-600 hover:underline transition-colors cursor-pointer break-all"
                                 >
-                                  {file.name}
+                                  <HighlightText text={file.name} query={searchQuery} />
                                 </a>
                               ) : (
-                                <span className="break-all">{file.name}</span>
+                                <span className="break-all">
+                                  <HighlightText text={file.name} query={searchQuery} />
+                                </span>
                               )}
                             </div>
                             {file.return_reason && (
                               <div className="mt-1 text-[12px] text-amber-700">
-                                Lý do trả về: {file.return_reason}
+                                Lý do trả về: <HighlightText text={file.return_reason} query={searchQuery} />
                               </div>
                             )}
                             {/* Approver email/error (Mobile only) */}
@@ -348,14 +355,14 @@ export default function PendingTable({ data, approverEmail, onSubmissionDone }: 
                                 className="block truncate rounded bg-blue-50 px-2 py-1 font-mono text-[11px] text-blue-600 hover:underline"
                                 title={file.new_file_path}
                               >
-                                {file.new_file_path}
+                                <HighlightText text={file.new_file_path} query={searchQuery} />
                               </a>
                             ) : (
                               <span
                                 className="block truncate rounded bg-gray-100 px-2 py-1 font-mono text-[11px] text-gray-600"
                                 title={file.new_file_path}
                               >
-                                {file.new_file_path}
+                                <HighlightText text={file.new_file_path} query={searchQuery} />
                               </span>
                             )
                           ) : (
@@ -417,8 +424,33 @@ export default function PendingTable({ data, approverEmail, onSubmissionDone }: 
         })}
 
         {data.length === 0 && (
-          <div className="py-8 text-center text-gray-500 text-[14px]">
-            No pending documents available.
+          <div className="py-12 px-4 text-center flex flex-col items-center justify-center">
+            {searchQuery ? (
+              <>
+                <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2.5">
+                  <Search size={20} />
+                </div>
+                <p className="text-gray-800 font-medium text-[15px] mb-1">
+                  Không tìm thấy tài liệu phù hợp
+                </p>
+                <p className="text-gray-500 text-[13px] max-w-sm mb-3">
+                  Không có submission hoặc file nào khớp với &ldquo;{searchQuery}&rdquo;. Thử tìm kiếm với từ khóa khác.
+                </p>
+                {onClearSearch && (
+                  <button
+                    type="button"
+                    onClick={onClearSearch}
+                    className="px-3.5 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer"
+                  >
+                    Xóa bộ lọc tìm kiếm
+                  </button>
+                )}
+              </>
+            ) : (
+              <div className="text-gray-500 text-[14px]">
+                No pending documents available.
+              </div>
+            )}
           </div>
         )}
       </div>

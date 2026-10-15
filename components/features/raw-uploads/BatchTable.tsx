@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Folder, MoreVertical, type LucideIcon } from "lucide-react";
+import { Folder, MoreVertical, Search, type LucideIcon } from "lucide-react";
 import SelectPathDrawer from "./SelectPathDrawer";
+import HighlightText from "@/components/common/HighlightText";
 
 export type FileItem = {
   id: string;
@@ -21,11 +22,14 @@ export type BatchItem = {
 
 interface BatchTableProps {
   data: BatchItem[];
+  searchQuery?: string;
   onPathSaved?: (file: FileItem, path: string) => void;
+  onClearSearch?: () => void;
 }
 
-export default function BatchTable({ data, onPathSaved }: BatchTableProps) {
+export default function BatchTable({ data, searchQuery = '', onPathSaved, onClearSearch }: BatchTableProps) {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+
   return (
     <>
       <div className="bg-white rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.05)] overflow-hidden mt-6 border border-gray-100">
@@ -48,7 +52,7 @@ export default function BatchTable({ data, onPathSaved }: BatchTableProps) {
                   </div>
                   <div>
                     <div className="font-medium text-gray-900 mb-1 text-[14px]">
-                      {batch.name}
+                      <HighlightText text={batch.name} query={searchQuery} />
                     </div>
                   </div>
                 </div>
@@ -82,19 +86,19 @@ export default function BatchTable({ data, onPathSaved }: BatchTableProps) {
                               rel="noopener noreferrer"
                               className="hover:text-blue-600 hover:underline transition-colors"
                             >
-                              {file.name}
+                              <HighlightText text={file.name} query={searchQuery} />
                             </a>
                           ) : (
-                            file.name
+                            <HighlightText text={file.name} query={searchQuery} />
                           )}
                           {file.new_file_path && (
                             <div className="mt-1 truncate font-mono text-[11px] text-blue-600" title={file.new_file_path}>
-                              {file.new_file_path}
+                              <HighlightText text={file.new_file_path} query={searchQuery} />
                             </div>
                           )}
                           {file.return_reason && (
                             <div className="mt-1 text-[12px] text-amber-700">
-                              Lý do trả về: {file.return_reason}
+                              Lý do trả về: <HighlightText text={file.return_reason} query={searchQuery} />
                             </div>
                           )}
                         </div>
@@ -115,8 +119,33 @@ export default function BatchTable({ data, onPathSaved }: BatchTableProps) {
 
           {/* Trạng thái rỗng */}
           {data.length === 0 && (
-            <div className="py-8 text-center text-gray-500 text-[14px]">
-              No data available.
+            <div className="py-12 px-4 text-center flex flex-col items-center justify-center">
+              {searchQuery ? (
+                <>
+                  <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2.5">
+                    <Search size={20} />
+                  </div>
+                  <p className="text-gray-800 font-medium text-[15px] mb-1">
+                    Không tìm thấy tệp hoặc batch phù hợp
+                  </p>
+                  <p className="text-gray-500 text-[13px] max-w-sm mb-3">
+                    Không có kết quả nào khớp với &ldquo;{searchQuery}&rdquo;. Thử tìm kiếm với tên tệp hoặc đường dẫn khác.
+                  </p>
+                  {onClearSearch && (
+                    <button
+                      type="button"
+                      onClick={onClearSearch}
+                      className="px-3.5 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer"
+                    >
+                      Xóa bộ lọc tìm kiếm
+                    </button>
+                  )}
+                </>
+              ) : (
+                <div className="text-gray-500 text-[14px]">
+                  No data available.
+                </div>
+              )}
             </div>
           )}
         </div>
