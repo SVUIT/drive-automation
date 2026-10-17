@@ -44,6 +44,8 @@ function LayoutContent({ children }: { children: React.ReactNode }) {
   );
 }
 
+import { SearchProvider } from './context/SearchContext';
+
 export default function RootLayout({
   children,
 }: {
@@ -53,7 +55,9 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AuthProvider>
-          <LayoutContent>{children}</LayoutContent>
+          <SearchProvider>
+            <LayoutContent>{children}</LayoutContent>
+          </SearchProvider>
         </AuthProvider>
       </body>
     </html>

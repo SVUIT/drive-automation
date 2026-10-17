@@ -1,206 +1,42 @@
 'use client';
 
-import React, { useState } from "react";
-import { Check, File } from "lucide-react";
-import { removeReturnedFile } from "@/app/approved-files/returned-files";
+import React from 'react';
+import { PendingItem, PendingFileItem } from './types';
+import { usePendingApproval } from '@/app/hooks/usePendingApproval';
+import PendingSubmissionRow from './PendingSubmissionRow';
+import EmptyState from '@/components/common/EmptyState';
 
-export type PendingFileItem = {
-  gdrive_file_id: string;
-  name: string;
-  icon: React.ElementType;
-  web_view_link?: string;
-  new_file_path?: string;
-  destination_folder_link?: string;
-  is_approved?: boolean | number | string | null;
-  return_reason?: string;
-  move_status?: string;
-  url?: string;
-  new_path?: string;
-};
-
-export type PendingItem = {
-  id: string;
-  name: string;
-  totalFiles: number;
-  icon: React.ElementType;
-  files?: PendingFileItem[];
-};
+// Re-export types for backward compatibility
+export type { PendingItem, PendingFileItem };
 
 interface PendingTableProps {
   data: PendingItem[];
   approverEmail: string;
+  searchQuery?: string;
+  onClearSearch?: () => void;
   onSubmissionDone: (submissionId: string) => void;
 }
 
-const APPWRITE_URL = '/api/appwrite';
-const MOVE_URL = '/api/appwrite-move';
-const isFileApproved = (file: PendingFileItem) =>
-  file.is_approved === true || file.is_approved === 1 || file.is_approved === 'true';
-
-const postJson = async (url: string, body: unknown) => {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const result = await response.json();
-
-  if (!response.ok || result.error) {
-    const detail = typeof result.detail === 'string'
-      ? result.detail
-      : result.detail
-        ? JSON.stringify(result.detail)
-        : undefined;
-    throw new Error(detail || result.error || `HTTP ${response.status}`);
-  }
-};
-
-export default function PendingTable({ data, approverEmail, onSubmissionDone }: PendingTableProps) {
-  const [loadingFileIds, setLoadingFileIds] = useState<Set<string>>(new Set());
-  const [loadingSubmissionIds, setLoadingSubmissionIds] = useState<Set<string>>(new Set());
-  const [approvedFileIds, setApprovedFileIds] = useState<Set<string>>(new Set());
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const setFileLoading = (id: string, val: boolean) =>
-    setLoadingFileIds(prev => {
-      const next = new Set(prev);
-      if (val) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-
-  const setSubmissionLoading = (id: string, val: boolean) =>
-    setLoadingSubmissionIds(prev => {
-      const next = new Set(prev);
-      if (val) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-
-  const setFileApproved = async (file: PendingFileItem) => {
-    if (!file.new_file_path?.trim()) {
-      throw new Error("Chưa có path. Vui lòng lưu path trước khi duyệt.");
-    }
-
-    await postJson(APPWRITE_URL, {
-      action: "insert file path",
-      new_path: file.new_file_path,
-      approver: approverEmail,
-      is_approved: true,
-      file_id: file.gdrive_file_id,
-    });
-  };
-
-  const queueMove = async () => {
-    await postJson(MOVE_URL, {});
-  };
-
-  const approveSubmission = async (submissionId: string) => {
-    await postJson(APPWRITE_URL, {
-      action: "approve submission",
-      submission_id: submissionId,
-    });
-  };
-
-  const handleApproveFile = async (item: PendingItem, file: PendingFileItem) => {
-    if (!approverEmail) {
-      setErrors(prev => ({ ...prev, [file.gdrive_file_id]: "Chưa đăng nhập." }));
-      return;
-    }
-    if (!file.new_file_path?.trim()) {
-      setErrors(prev => ({ ...prev, [file.gdrive_file_id]: "Chưa có path. Vui lòng lưu path trước khi duyệt." }));
-      return;
-    }
-
-    setErrors(prev => ({ ...prev, [file.gdrive_file_id]: "" }));
-    setFileLoading(file.gdrive_file_id, true);
-
-    try {
-      await setFileApproved(file);
-      removeReturnedFile(file.gdrive_file_id);
-      setApprovedFileIds(prev => new Set(prev).add(file.gdrive_file_id));
-
-      const files = item.files ?? [];
-      const allDone = files.every(
-        candidate =>
-          Boolean(candidate.new_file_path?.trim()) &&
-          (
-            candidate.gdrive_file_id === file.gdrive_file_id ||
-            isFileApproved(candidate) ||
-            approvedFileIds.has(candidate.gdrive_file_id)
-          )
-      );
-      if (allDone) {
-        await approveSubmission(item.id);
-      }
-      await queueMove();
-      if (allDone) onSubmissionDone(item.id);
-    } catch (err) {
-      setErrors(prev => ({
-        ...prev,
-        [file.gdrive_file_id]: err instanceof Error ? err.message : "Lỗi. Thử lại.",
-      }));
-    } finally {
-      setFileLoading(file.gdrive_file_id, false);
-    }
-  };
-
-  const handleApproveAllFiles = async (item: PendingItem) => {
-    if (!approverEmail) {
-      setErrors(prev => ({ ...prev, [item.id]: "Chưa đăng nhập." }));
-      return;
-    }
-
-    setErrors(prev => ({ ...prev, [item.id]: "" }));
-    setSubmissionLoading(item.id, true);
-
-    try {
-      const files = item.files ?? [];
-      if (files.some(file => !file.new_file_path?.trim())) {
-        throw new Error("Cần lưu path cho tất cả file trước khi duyệt.");
-      }
-
-      const filesToApprove = files.filter(
-        file =>
-          !isFileApproved(file) &&
-          !approvedFileIds.has(file.gdrive_file_id)
-      );
-
-      await Promise.all(
-        filesToApprove.map(async file => {
-          await setFileApproved(file);
-          removeReturnedFile(file.gdrive_file_id);
-          setApprovedFileIds(prev => new Set(prev).add(file.gdrive_file_id));
-        })
-      );
-
-      const allFilesApproved = files.every(
-        file =>
-          Boolean(file.new_file_path?.trim()) &&
-          (
-            isFileApproved(file) ||
-            approvedFileIds.has(file.gdrive_file_id) ||
-            filesToApprove.some(approved => approved.gdrive_file_id === file.gdrive_file_id)
-          )
-      );
-      if (allFilesApproved) {
-        await approveSubmission(item.id);
-      }
-      await queueMove();
-      if (allFilesApproved) onSubmissionDone(item.id);
-    } catch (err) {
-      setErrors(prev => ({
-        ...prev,
-        [item.id]: err instanceof Error ? err.message : "Lỗi. Thử lại.",
-      }));
-    } finally {
-      setSubmissionLoading(item.id, false);
-    }
-  };
+export default function PendingTable({
+  data,
+  approverEmail,
+  searchQuery = '',
+  onClearSearch,
+  onSubmissionDone,
+}: PendingTableProps) {
+  const {
+    loadingFileIds,
+    loadingSubmissionIds,
+    approvedFileIds,
+    errors,
+    isFileApproved,
+    handleApproveFile,
+    handleApproveAllFiles,
+  } = usePendingApproval();
 
   return (
     <div className="bg-white rounded-lg shadow-[0_1px_3px_rgba(0,0,0,0.05)] overflow-hidden mt-6 border border-gray-100 pb-2">
-      {/* Header */}
+      {/* Table Header */}
       <div className="hidden lg:flex py-4 px-6 bg-[#f9fafb] border-b border-gray-200 text-[11px] font-semibold text-gray-500 tracking-wider uppercase">
         <div className="flex-[3] flex items-center">Document name & files</div>
         <div className="flex-[2] flex items-center">Generated path</div>
@@ -209,217 +45,35 @@ export default function PendingTable({ data, approverEmail, onSubmissionDone }: 
         <div className="flex-[1] flex items-center justify-end">Actions</div>
       </div>
 
+      {/* Table Body */}
       <div className="flex flex-col divide-y divide-gray-200">
-        {data.map((item, idx) => {
-          const IconComponent = item.icon || File;
-          return (
-            <div key={item.id || idx} className="flex flex-col">
-              {/* Submission row */}
-              <div className="flex flex-col lg:flex-row py-4 px-4 sm:px-6 lg:items-center bg-[#fafafa] gap-3 lg:gap-0">
-                {/* Name & Icon */}
-                <div className="flex-1 lg:flex-[3] flex items-center pr-0 lg:pr-4 min-w-0">
-                  <div className="w-10 h-10 bg-brand-blue-bg rounded-lg flex items-center justify-center mr-4 shrink-0">
-                    <IconComponent size={20} className="text-brand-blue" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="font-bold text-[14px] text-gray-900 block truncate">{item.name}</span>
-                    {errors[item.id] && (
-                      <span className="mt-1 block text-[11px] text-red-600">{errors[item.id]}</span>
-                    )}
-                  </div>
-                </div>
+        {data.map((item, idx) => (
+          <PendingSubmissionRow
+            key={item.id || idx}
+            item={item}
+            approverEmail={approverEmail}
+            searchQuery={searchQuery}
+            loadingSubmissionIds={loadingSubmissionIds}
+            loadingFileIds={loadingFileIds}
+            approvedFileIds={approvedFileIds}
+            errors={errors}
+            isFileApproved={isFileApproved}
+            onApproveFile={(it, file) =>
+              handleApproveFile(it, file, approverEmail, onSubmissionDone)
+            }
+            onApproveAllFiles={(it) =>
+              handleApproveAllFiles(it, approverEmail, onSubmissionDone)
+            }
+          />
+        ))}
 
-                {/* Generated path is displayed on each file row only. */}
-                <div className="hidden lg:block lg:flex-[2] pr-4" />
-
-                {/* Total files (Desktop only) */}
-                <div className="hidden lg:flex lg:flex-[1] items-center text-[14px] font-medium text-gray-600 pl-4">
-                  <span>{item.totalFiles} file{item.totalFiles !== 1 ? 's' : ''}</span>
-                </div>
-
-                {/* Approver space (desktop spacer) */}
-                <div className="hidden lg:block lg:flex-[1.5]" />
-
-                {/* Approve all button (Desktop only) */}
-                <div className="hidden lg:flex lg:flex-[1] items-center justify-end">
-                  <button
-                    disabled={loadingSubmissionIds.has(item.id) || (item.files ?? []).some(file => !file.new_file_path?.trim())}
-                    onClick={() => handleApproveAllFiles(item)}
-                    className="flex items-center justify-center w-7 h-7 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60 cursor-pointer"
-                    title="Approve All"
-                  >
-                    {loadingSubmissionIds.has(item.id) ? (
-                      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4"/>
-                        <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8v8z"/>
-                      </svg>
-                    ) : (
-                      <Check size={16} />
-                    )}
-                  </button>
-                </div>
-
-                {/* Mobile metadata line: total files & approve all button */}
-                <div className="flex lg:hidden items-center justify-between mt-2 pt-2 border-t border-gray-100">
-                  <div className="text-[13px] text-gray-500 font-medium">
-                    Tổng số file: <span className="text-gray-800 font-bold">{item.totalFiles}</span>
-                  </div>
-                  <button
-                    disabled={loadingSubmissionIds.has(item.id) || (item.files ?? []).some(file => !file.new_file_path?.trim())}
-                    onClick={() => handleApproveAllFiles(item)}
-                    className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60 text-xs font-semibold cursor-pointer"
-                    title="Approve All"
-                  >
-                    {loadingSubmissionIds.has(item.id) ? (
-                      <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4"/>
-                        <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8v8z"/>
-                      </svg>
-                    ) : (
-                      <>
-                        <Check size={14} />
-                        <span>Duyệt tất cả</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              {/* File rows */}
-              {item.files && item.files.length > 0 && (
-                <div className="px-4 sm:px-6 pb-5 pl-6 sm:pl-8 lg:pl-20 flex flex-col gap-2 relative">
-                  <div className="absolute left-[15px] sm:left-[20px] lg:left-11 top-[-16px] bottom-7 w-px bg-gray-200" />
-                  {item.files.map((file, nestedIdx) => {
-                    const FileIcon = file.icon || File;
-                    const isLoading = loadingFileIds.has(file.gdrive_file_id);
-                    const isApproved = isFileApproved(file) || approvedFileIds.has(file.gdrive_file_id);
-
-                    return (
-                      <div key={file.gdrive_file_id || nestedIdx} className="flex flex-col lg:flex-row items-stretch lg:items-center relative gap-2 lg:gap-0 border-b border-dashed border-gray-100 lg:border-none pb-2 lg:pb-0 pt-2 lg:pt-0">
-                        <div className="absolute left-[-15px] sm:left-[-25px] lg:left-[-36px] top-[18px] lg:top-1/2 w-2.5 sm:w-3 lg:w-4 h-px bg-gray-200" />
-
-                        {/* File name */}
-                        <div className="flex-1 lg:flex-[3] flex items-start gap-3 min-w-0 pr-0 lg:pr-4">
-                          <div className="flex items-center justify-center shrink-0 bg-white z-10 py-1">
-                            <FileIcon size={18} className={isApproved ? "text-gray-300" : "text-brand-blue"} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className={`text-[14px] font-medium leading-tight ${isApproved ? 'text-gray-300 line-through' : 'text-gray-700'}`}>
-                              {file.url ? (
-                                <a
-                                  href={file.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="hover:text-blue-600 hover:underline transition-colors cursor-pointer break-all"
-                                >
-                                  {file.name}
-                                </a>
-                              ) : (
-                                <span className="break-all">{file.name}</span>
-                              )}
-                            </div>
-                            {file.return_reason && (
-                              <div className="mt-1 text-[12px] text-amber-700">
-                                Lý do trả về: {file.return_reason}
-                              </div>
-                            )}
-                            {/* Approver email/error (Mobile only) */}
-                            {isApproved && (
-                              <span className="lg:hidden mt-0.5 text-[11px] text-gray-400 block truncate">
-                                Người duyệt: {approverEmail}
-                              </span>
-                            )}
-                            {errors[file.gdrive_file_id] && (
-                              <span className="lg:hidden mt-0.5 text-[11px] text-red-500 block">
-                                {errors[file.gdrive_file_id]}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Generated path of this file from submitted_files.new_file_path */}
-                        <div className="lg:flex-[2] pr-0 lg:pr-4 min-w-0 pl-7 lg:pl-0">
-                          {file.new_file_path ? (
-                            file.destination_folder_link ? (
-                              <a
-                                href={file.destination_folder_link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="block truncate rounded bg-blue-50 px-2 py-1 font-mono text-[11px] text-blue-600 hover:underline"
-                                title={file.new_file_path}
-                              >
-                                {file.new_file_path}
-                              </a>
-                            ) : (
-                              <span
-                                className="block truncate rounded bg-gray-100 px-2 py-1 font-mono text-[11px] text-gray-600"
-                                title={file.new_file_path}
-                              >
-                                {file.new_file_path}
-                              </span>
-                            )
-                          ) : (
-                            <span className="block rounded bg-amber-50 px-2 py-1 font-mono text-[11px] text-amber-600">
-                              Chưa có path
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Spacer - Desktop only */}
-                        <div className="hidden lg:block lg:flex-[1] pl-4" />
-
-                        {/* Approver - Desktop only */}
-                        <div className="hidden lg:flex lg:flex-[1.5] pr-4 items-center">
-                          {isApproved && (
-                            <span className="text-[12px] text-gray-400 truncate">{approverEmail}</span>
-                          )}
-                          {errors[file.gdrive_file_id] && (
-                            <span className="text-[11px] text-red-500">{errors[file.gdrive_file_id]}</span>
-                          )}
-                        </div>
-
-                        {/* Actions */}
-                        <div className="w-full lg:w-auto lg:flex-[1] flex items-center justify-end gap-2 mt-1 lg:mt-0">
-                          {isApproved ? (
-                            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[#e6fcf5] text-[#0ca678]">
-                              Approved
-                            </span>
-                          ) : (
-                            <div className="flex gap-2 w-full lg:w-auto justify-end">
-                              <button
-                                disabled={isLoading || isApproved || !file.new_file_path?.trim()}
-                                onClick={() => handleApproveFile(item, file)}
-                                className="flex-1 lg:flex-none flex items-center justify-center w-auto lg:w-7 h-8 lg:h-7 rounded bg-[#183a64] text-white hover:bg-blue-900 transition-colors disabled:opacity-60 px-3 lg:px-0 text-xs font-semibold lg:font-normal cursor-pointer"
-                                title="Approve"
-                              >
-                                {isLoading ? (
-                                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4"/>
-                                    <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8v8z"/>
-                                  </svg>
-                                ) : (
-                                  <>
-                                    <Check size={16} className="mr-1 lg:mr-0" />
-                                    <span className="lg:hidden">{file.new_file_path ? "Duyệt" : "Cần path"}</span>
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
+        {/* Empty state */}
         {data.length === 0 && (
-          <div className="py-8 text-center text-gray-500 text-[14px]">
-            No pending documents available.
-          </div>
+          <EmptyState
+            searchQuery={searchQuery}
+            emptyTitle="Không có tài liệu nào đang chờ duyệt."
+            onClearSearch={onClearSearch}
+          />
         )}
       </div>
     </div>
